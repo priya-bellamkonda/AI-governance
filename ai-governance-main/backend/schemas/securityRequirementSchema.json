@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rakfort.com/schemas/security-requirement.json",
+  "title": "Security Requirement",
+  "description": "Schema for RAKFORT Healthcare security requirements",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "description",
+    "category",
+    "priority",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique requirement ID e.g. REQ-2026-001",
+      "pattern": "^REQ-[0-9]{4}-[0-9]{3}$"
+    },
+    "title": {
+      "type": "string",
+      "description": "Short title of the requirement",
+      "minLength": 5,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "description": "Full description of what must be implemented",
+      "minLength": 10
+    },
+    "category": {
+      "type": "string",
+      "description": "Type of security requirement",
+      "enum": [
+        "Authentication",
+        "Access Control",
+        "Encryption",
+        "Data Protection",
+        "Logging",
+        "Network Security",
+        "Physical Security",
+        "Incident Response",
+        "Compliance",
+        "AI Security",
+        "IoT Security"
+      ]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["Critical", "High", "Medium", "Low"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["Draft", "Approved", "In Progress", "Implemented", "Rejected"]
+    },
+    "compliance_mappings": {
+      "type": "array",
+      "description": "Links to compliance standards",
+      "items": {
+        "type": "object",
+        "required": ["framework", "control"],
+        "properties": {
+          "framework": {
+            "type": "string",
+            "enum": [
+              "ISO 27001",
+              "IEC 62443",
+              "OWASP ASVS",
+              "NIST CSF",
+              "PCI DSS",
+              "GDPR",
+              "NIS2",
+              "MDR",
+              "HIPAA"
+            ]
+          },
+          "version": { "type": "string" },
+          "control": { "type": "string" }
+        }
+      }
+    },
+    "linked_assets": {
+      "type": "array",
+      "description": "List of asset IDs this requirement applies to",
+      "items": { "type": "string" }
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["chat", "document", "manual", "jira", "confluence"]
+        },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "reference": { "type": "string" }
+      }
+    },
+    "verification_method": {
+      "type": "string",
+      "description": "How this requirement will be tested or verified"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "description": "List of conditions that must be true for requirement to be met",
+      "items": { "type": "string" }
+    },
+    "owner": { "type": "string" },
+    "review_date": { "type": "string", "format": "date" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

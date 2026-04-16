@@ -1,0 +1,47 @@
+import axios from "axios";
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return { Authorization: `Bearer ${token}` };
+};
+
+export const getRequirements = async (filters = {}) => {
+  const params = new URLSearchParams();
+  if (filters.category) params.append("category", filters.category);
+  if (filters.priority) params.append("priority", filters.priority);
+  if (filters.status)   params.append("status",   filters.status);
+
+  const response = await axios.get(
+    `${API_BASE}/requirements?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const createRequirement = async (data) => {
+  const response = await axios.post(
+    `${API_BASE}/requirements`,
+    data,
+    { headers: getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const updateRequirement = async (id, data) => {
+  const response = await axios.put(
+    `${API_BASE}/requirements/${id}`,
+    data,
+    { headers: getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const deleteRequirement = async (id) => {
+  const response = await axios.delete(
+    `${API_BASE}/requirements/${id}`,
+    { headers: getAuthHeaders() }
+  );
+  return response.data;
+};
