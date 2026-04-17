@@ -128,6 +128,12 @@ const Sidebar = ({ open, onToggle }) => {
               to="/requirements"
               open={open}
             />
+            <SidebarItem
+              icon={<BarChart3 />}
+              label="AI Requirement Collection"
+              to="/collection"
+              open={open}
+            />
 
             <SidebarItem
               icon={<Heart />}

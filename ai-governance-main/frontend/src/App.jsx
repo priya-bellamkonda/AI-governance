@@ -35,6 +35,7 @@ import Inventory from "./pages/Inventory/main";
 import Support from "./support";
 import RateLimitSnackbar from "./components/rateLimitSnackbar";
 import RequirementsPage from "./pages/requirements";
+import Collection from "./pages/Collection/Collection";
 
 function AppRoutes() {
   return (
@@ -48,6 +49,7 @@ function AppRoutes() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="templates" element={<Templates />} />
           <Route path="requirements" element={<RequirementsPage />} />
+          <Route path="collection" element={<Collection />} />
           <Route path="templates/:templateId" element={<TemplateQuestions />} />
           <Route path="usecase" element={<UseCase />} />
           <Route path="questionare" element={<Questionare />} />

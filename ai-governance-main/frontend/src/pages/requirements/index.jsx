@@ -16,17 +16,22 @@ import {
   SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   DropdownMenu, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Search, Plus, MoreHorizontal,
   ChevronLeft, ChevronRight, ShieldCheck,
+  Zap, MessageCircle,
 } from "lucide-react";
 import {
   getRequirements,
   createRequirement,
   deleteRequirement,
+  collectRequirements,
 } from "../../services/requirementsService.js";
 
 // ── Colour helpers ──────────────────────────────────────────
@@ -76,6 +81,9 @@ export default function RequirementsPage() {
   const [isLoading, setIsLoading]       = useState(true);
   const [error, setError]               = useState(null);
 
+  // tabs
+  const [activeTab, setActiveTab]       = useState("all");
+
   // filters
   const [search, setSearch]             = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -91,6 +99,12 @@ export default function RequirementsPage() {
   const [form, setForm]                 = useState(emptyForm);
   const [formError, setFormError]       = useState("");
   const [saving, setSaving]             = useState(false);
+
+  // AI Collection
+  const [aiMessages, setAiMessages]     = useState([]);
+  const [aiInput, setAiInput]           = useState("");
+  const [aiLoading, setAiLoading]       = useState(false);
+  const [aiSessionId] = useState("session-" + Date.now());
 
   // ── Fetch ──────────────────────────────────────────────────
   const fetchData = async () => {
@@ -175,6 +189,39 @@ export default function RequirementsPage() {
     }
   };
 
+  // ── AI Collection ──────────────────────────────────────────
+  const handleAiCollect = async () => {
+    if (!aiInput.trim()) return;
+    
+    // Add user message to chat
+    const userMsg = { role: "user", content: aiInput };
+    setAiMessages(prev => [...prev, userMsg]);
+    setAiInput("");
+    setAiLoading(true);
+
+    try {
+      const response = await collectRequirements(aiSessionId, [...aiMessages, userMsg]);
+      
+      // Add AI response
+      const assistantMsg = { 
+        role: "assistant", 
+        content: response.data?.message || "Requirements collected successfully!" 
+      };
+      setAiMessages(prev => [...prev, assistantMsg]);
+      
+      // Refresh requirements list
+      fetchData();
+    } catch (err) {
+      const errorMsg = { 
+        role: "assistant", 
+        content: `Error: ${err.response?.data?.error || err.message}` 
+      };
+      setAiMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   // ── Summary counts ─────────────────────────────────────────
   const counts = {
     total:       requirements.length,
@@ -183,7 +230,7 @@ export default function RequirementsPage() {
     inProgress:  requirements.filter(r => r.status  === "In Progress").length,
   };
 
-  // ══════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-background">
       <main className="p-6">
@@ -204,153 +251,242 @@ export default function RequirementsPage() {
           </Button>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          {[
-            { label: "Total",       value: counts.total,       color: "text-foreground" },
-            { label: "Critical",    value: counts.critical,    color: "text-red-600"    },
-            { label: "Implemented", value: counts.implemented, color: "text-blue-600"   },
-            { label: "In Progress", value: counts.inProgress,  color: "text-amber-600"  },
-          ].map(({ label, value, color }) => (
-            <Card key={label} className="p-4 text-center">
-              <p className={`text-3xl font-bold ${color}`}>{value}</p>
-              <p className="text-sm text-muted-foreground mt-1">{label}</p>
-            </Card>
-          ))}
-        </div>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+            <TabsTrigger value="all" className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" />
+              All Requirements
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="flex items-center gap-2">
+              <Zap className="w-4 h-4" />
+              AI Collection
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-6">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-            <Input
-              placeholder="Search by ID or title..."
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-              className="pl-10"
-            />
-          </div>
-
-          {[
-            { value: filterCategory, setter: setFilterCategory, placeholder: "All Categories", options: CATEGORIES },
-            { value: filterPriority, setter: setFilterPriority, placeholder: "All Priorities", options: PRIORITIES },
-            { value: filterStatus,   setter: setFilterStatus,   placeholder: "All Statuses",   options: STATUSES   },
-          ].map(({ value, setter, placeholder, options }) => (
-            <Select key={placeholder} value={value}
-              onValueChange={(v) => { setter(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder={placeholder} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{placeholder}</SelectItem>
-                {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          ))}
-        </div>
-
-        {/* Table */}
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Compliance</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10">Loading requirements...</TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-destructive py-10">{error}</TableCell>
-                </TableRow>
-              ) : paginated.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10">No requirements found.</TableCell>
-                </TableRow>
-              ) : paginated.map((req) => (
-                <TableRow key={req._id}>
-                  <TableCell className="font-mono text-sm font-medium">{req.id}</TableCell>
-                  <TableCell className="max-w-[220px]">
-                    <p className="font-medium truncate">{req.title}</p>
-                    <p className="text-xs text-muted-foreground truncate">{req.description}</p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{req.category}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={priorityColor(req.priority)}>{req.priority}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={statusColor(req.status)}>{req.status}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">{req.owner || "—"}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {req.compliance_mappings?.slice(0, 2).map((m, i) => (
-                        <Badge key={i} variant="secondary" className="text-xs">
-                          {m.framework}
-                        </Badge>
-                      ))}
-                      {req.compliance_mappings?.length > 2 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{req.compliance_mappings.length - 2}
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => handleDelete(req.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
+          {/* ═════════════════════════════════════════════ */}
+          {/* TAB 1: All Requirements */}
+          {/* ═════════════════════════════════════════════ */}
+          <TabsContent value="all">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {[
+                { label: "Total",       value: counts.total,       color: "text-foreground" },
+                { label: "Critical",    value: counts.critical,    color: "text-red-600"    },
+                { label: "Implemented", value: counts.implemented, color: "text-blue-600"   },
+                { label: "In Progress", value: counts.inProgress,  color: "text-amber-600"  },
+              ].map(({ label, value, color }) => (
+                <Card key={label} className="p-4 text-center">
+                  <p className={`text-3xl font-bold ${color}`}>{value}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{label}</p>
+                </Card>
               ))}
-            </TableBody>
-          </Table>
+            </div>
 
-          {/* Pagination */}
-          {!isLoading && !error && totalPages > 1 && (
-            <div className="flex items-center justify-between p-4 border-t">
-              <span className="text-sm text-muted-foreground">
-                Page {currentPage} of {totalPages} ({filtered.length} total)
-              </span>
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 mb-6">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                <Input
+                  placeholder="Search by ID or title..."
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+                  className="pl-10"
+                />
+              </div>
+
+              {[
+                { value: filterCategory, setter: setFilterCategory, placeholder: "All Categories", options: CATEGORIES },
+                { value: filterPriority, setter: setFilterPriority, placeholder: "All Priorities", options: PRIORITIES },
+                { value: filterStatus,   setter: setFilterStatus,   placeholder: "All Statuses",   options: STATUSES   },
+              ].map(({ value, setter, placeholder, options }) => (
+                <Select key={placeholder} value={value}
+                  onValueChange={(v) => { setter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-44">
+                    <SelectValue placeholder={placeholder} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{placeholder}</SelectItem>
+                    {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ))}
+            </div>
+
+            {/* Table */}
+            <Card>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Owner</TableHead>
+                    <TableHead>Compliance</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-10">Loading requirements...</TableCell>
+                    </TableRow>
+                  ) : error ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center text-destructive py-10">{error}</TableCell>
+                    </TableRow>
+                  ) : paginated.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-10">No requirements found.</TableCell>
+                    </TableRow>
+                  ) : paginated.map((req) => (
+                    <TableRow key={req._id}>
+                      <TableCell className="font-mono text-sm font-medium">{req.id}</TableCell>
+                      <TableCell className="max-w-[220px]">
+                        <p className="font-medium truncate">{req.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">{req.description}</p>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{req.category}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={priorityColor(req.priority)}>{req.priority}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={statusColor(req.status)}>{req.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{req.owner || "—"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {req.compliance_mappings?.slice(0, 2).map((m, i) => (
+                            <Badge key={i} variant="secondary" className="text-xs">
+                              {m.framework}
+                            </Badge>
+                          ))}
+                          {req.compliance_mappings?.length > 2 && (
+                            <Badge variant="secondary" className="text-xs">
+                              +{req.compliance_mappings.length - 2}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => handleDelete(req.id)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {/* Pagination */}
+              {!isLoading && !error && totalPages > 1 && (
+                <div className="flex items-center justify-between p-4 border-t">
+                  <span className="text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages} ({filtered.length} total)
+                  </span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                      disabled={currentPage === 1}>
+                      <ChevronLeft className="w-4 h-4 mr-1" /> Previous
+                    </Button>
+                    <Button variant="outline" size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                      disabled={currentPage === totalPages}>
+                      Next <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+
+          {/* ═════════════════════════════════════════════ */}
+          {/* TAB 2: AI Collection */}
+          {/* ═════════════════════════════════════════════ */}
+          <TabsContent value="ai">
+            <Card className="p-6">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-amber-500" />
+                AI Requirement Collection
+              </h2>
+              <p className="text-muted-foreground mb-6">
+                Chat with the AI agent to automatically extract and create security requirements.
+              </p>
+
+              {/* Chat Messages */}
+              <div className="border rounded-lg p-4 bg-muted/30 min-h-[400px] max-h-[500px] overflow-y-auto mb-4">
+                {aiMessages.length === 0 ? (
+                  <div className="flex items-center justify-center h-[400px] text-center">
+                    <div>
+                      <MessageCircle className="w-12 h-12 text-muted-foreground mx-auto mb-2 opacity-50" />
+                      <p className="text-muted-foreground">Start a conversation to collect requirements...</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {aiMessages.map((msg, i) => (
+                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-2 rounded-lg ${
+                          msg.role === "user"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-secondary text-secondary-foreground"
+                        }`}>
+                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {aiLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg">
+                          <p className="text-sm">Thinking...</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
               <div className="flex gap-2">
-                <Button variant="outline" size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-                  disabled={currentPage === 1}>
-                  <ChevronLeft className="w-4 h-4 mr-1" /> Previous
-                </Button>
-                <Button variant="outline" size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-                  disabled={currentPage === totalPages}>
-                  Next <ChevronRight className="w-4 h-4 ml-1" />
+                <Input
+                  placeholder="E.g., 'Extract authentication requirements from NIST CSF'..."
+                  value={aiInput}
+                  onChange={(e) => setAiInput(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && handleAiCollect()}
+                  disabled={aiLoading}
+                />
+                <Button 
+                  onClick={handleAiCollect} 
+                  disabled={aiLoading || !aiInput.trim()}
+                  className="gap-2">
+                  <Zap className="w-4 h-4" />
+                  {aiLoading ? "Processing..." : "Send"}
                 </Button>
               </div>
-            </div>
-          )}
-        </Card>
+
+              <p className="text-xs text-muted-foreground mt-4">
+                💡 Tip: Ask the AI to extract requirements from compliance frameworks, specifications, or documents.
+              </p>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Add Requirement Modal */}
         <Dialog open={showModal} onOpenChange={setShowModal}>
