@@ -1,8 +1,47 @@
 import express from 'express';
+import axios from 'axios';
 import SecurityRequirement from '../models/SecurityRequirement.js';
 import { validateRequirement } from '../services/requirementValidator.js';
 
 const router = express.Router();
+const AGENT_URL = process.env.AGENT_URL || 'http://localhost:8000';
+
+// ============================================
+// AI AGENT COLLECTION - Proxy to Python Agent
+// ============================================
+// POST /requirements/collect - Send chat messages to AI collection agent
+router.post('/collect', async (req, res) => {
+  try {
+    const { session_id, messages } = req.body;
+    
+    // Validate required fields
+    if (!session_id || !messages) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'session_id and messages are required' 
+      });
+    }
+    
+    // Call Python Collection Agent
+    const response = await axios.post(`${AGENT_URL}/agent/collection/collect`, {
+      session_id,
+      messages
+    });
+    
+    res.json({ success: true, data: response.data });
+  } catch (error) {
+    console.error('Error calling collection agent:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to communicate with AI agent',
+      details: error.message 
+    });
+  }
+});
+
+// ============================================
+// STANDARD CRUD OPERATIONS
+// ============================================
 
 // GET all requirements
 router.get('/', async (req, res) => {

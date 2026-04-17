@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+// Compliance mapping schema for detailed framework mappings
 const complianceMappingSchema = new mongoose.Schema({
   framework: {
     type: String,
@@ -8,15 +9,23 @@ const complianceMappingSchema = new mongoose.Schema({
     required: true
   },
   version: { type: String },
-  control: { type: String, required: true }
+  control: { type: String, required: true },
+  controlId: { type: String } // For Jira/external tool references
 }, { _id: false });
 
+// Enhanced requirement schema merging both implementations
 const securityRequirementSchema = new mongoose.Schema({
+  // Identifier (can be auto-generated or custom)
   id: {
     type: String,
-    required: true,
-    unique: true,
+    sparse: true,
     match: /^REQ-[0-9]{4}-[0-9]{3}$/
+  },
+  
+  // Basic Information
+  projectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Projects'
   },
   title: {
     type: String,
@@ -29,6 +38,8 @@ const securityRequirementSchema = new mongoose.Schema({
     required: true,
     minlength: 10
   },
+  
+  // Classification
   category: {
     type: String,
     required: true,
@@ -36,32 +47,50 @@ const securityRequirementSchema = new mongoose.Schema({
       'Authentication', 'Access Control', 'Encryption',
       'Data Protection', 'Logging', 'Network Security',
       'Physical Security', 'Incident Response', 'Compliance',
-      'AI Security', 'IoT Security'
-    ]
+      'AI Security', 'IoT Security', 'Other'
+    ],
+    default: 'Other'
   },
   priority: {
     type: String,
     required: true,
-    enum: ['Critical', 'High', 'Medium', 'Low']
+    enum: ['Critical', 'High', 'Medium', 'Low'],
+    default: 'High'
   },
   status: {
     type: String,
-    required: true,
-    enum: ['Draft', 'Approved', 'In Progress', 'Implemented', 'Rejected'],
+    enum: ['Draft', 'Approved', 'In Progress', 'Implemented', 'Rejected', 'Mapped'],
     default: 'Draft'
   },
+  
+  // Compliance & Mapping
   compliance_mappings: [complianceMappingSchema],
+  complianceMappings: [complianceMappingSchema], // Support both naming conventions
   linked_assets: [{ type: String }],
+  
+  // Source Tracking
   source: {
     type: { type: String, enum: ['chat', 'document', 'manual', 'jira', 'confluence'] },
     timestamp: { type: Date },
     reference: { type: String }
   },
+  externalId: String, // Jira ticket ID or Confluence page ID
+  
+  // Implementation Details
   verification_method: { type: String },
   acceptance_criteria: [{ type: String }],
   owner: { type: String },
   review_date: { type: Date },
-  projectId: { type: String }
+  
+  // User Reference
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }
 }, {
   timestamps: true
 });

@@ -59,7 +59,7 @@ app.get('/', (req, res) => {
 // PROTECTED ROUTES (AUTH + RATE LIMIT)
 // ------------------------------
 app.use(authenticateToken);
-app.use(userQuotaLimiter);
+// app.use(userQuotaLimiter); // DISABLED FOR TESTING
 
 // ------------------------------
 // PROTECTED ROUTES
