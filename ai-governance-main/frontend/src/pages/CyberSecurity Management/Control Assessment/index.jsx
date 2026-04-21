@@ -210,7 +210,7 @@ const ControlAssessment = () => {
           c.relatedRisks || "N/A",
           c.status,
         ]);
-        doc.autoTable({ head: [tableColumn], body: tableRows, startY: 20 });
+        autoTable(doc, { head: [tableColumn], body: tableRows, startY: 20 });
         doc.save("Cybersecurity_Controls_Export.pdf");
       }
     } catch (err) {
@@ -250,7 +250,7 @@ const ControlAssessment = () => {
               <Menu.Button
                 as={Button}
                 variant="outline"
-                size="sm"
+                className="w-[150px] h-10"
                 disabled={isExporting}
               >
                 <Download className="w-4 h-4 mr-2" />
@@ -300,119 +300,23 @@ const ControlAssessment = () => {
               </Transition>
             </Menu>
             {/* 7. REPLACE the old project <Select> with this new <Popover> Combobox */}
-            <Popover
-              open={isProjectPopoverOpen}
-              onOpenChange={setProjectPopoverOpen}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={isProjectPopoverOpen}
-                  className="w-[200px] justify-between"
-                >
-                  {selectedProjectId === "all"
-                    ? "Select a Project"
-                    : projects.find((p) => p.projectId === selectedProjectId)
-                        ?.name || "Select a Project"}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[200px] p-0 z-50">
-                {" "}
-                {/* Added z-index */}
-                <Command>
-                  <CommandInput placeholder="Search projects..." />
-                  <CommandList>
-                    <CommandEmpty>No project found.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        value="all"
-                        onSelect={() => {
-                          setSelectedProjectId("all");
-                          setProjectPopoverOpen(false);
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            "mr-2 h-4 w-4",
-                            selectedProjectId === "all"
-                              ? "opacity-100"
-                              : "opacity-0"
-                          )}
-                        />
-                        All Projects
-                      </CommandItem>
-                    </CommandGroup>
-
-                    {/* Recent Projects Section */}
-                    {recentProjects.length > 0 && (
-                      <>
-                        <CommandSeparator />
-                        <CommandGroup heading="Recent Projects">
-                          {recentProjects.map((p) => (
-                            <CommandItem
-                              key={p.projectId}
-                              value={p.name}
-                              onSelect={() => {
-                                setSelectedProjectId(p.projectId);
-                                setProjectPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  selectedProjectId === p.projectId
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                              {p.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </>
-                    )}
-
-                    {/* All Other Projects Section */}
-                    {allOtherProjects.length > 0 && (
-                      <>
-                        <CommandSeparator />
-                        <CommandGroup heading="All Projects">
-                          {allOtherProjects.map((p) => (
-                            <CommandItem
-                              key={p.projectId}
-                              value={p.name}
-                              onSelect={() => {
-                                setSelectedProjectId(p.projectId);
-                                setProjectPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  selectedProjectId === p.projectId
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                              {p.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </>
-                    )}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+              <SelectTrigger className="w-[200px] h-10">
+                <SelectValue placeholder="Select a Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.projectId} value={p.projectId}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {/* Status Filter */}
             <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-40">
-                <SelectValue>
-                  {statusOptions.find((opt) => opt.value === status)?.label ||
-                    "All Statuses"}
-                </SelectValue>
+              <SelectTrigger className="w-[180px] h-10">
+                <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
                 {statusOptions.map((opt) => (

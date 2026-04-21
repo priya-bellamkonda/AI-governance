@@ -2,7 +2,7 @@ const VALID_CATEGORIES = [
   'Authentication', 'Access Control', 'Encryption',
   'Data Protection', 'Logging', 'Network Security',
   'Physical Security', 'Incident Response', 'Compliance',
-  'AI Security', 'IoT Security'
+  'AI Security', 'IoT Security', 'Other'
 ];
 
 const VALID_PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
@@ -13,6 +13,7 @@ const VALID_FRAMEWORKS = [
   'ISO 27001', 'IEC 62443', 'OWASP ASVS',
   'NIST CSF', 'PCI DSS', 'GDPR', 'NIS2', 'MDR', 'HIPAA'
 ];
+const VALID_SOURCES = ['chat', 'document', 'manual', 'jira', 'confluence'];
 
 export function validateRequirement(data) {
   const errors = [];
@@ -39,6 +40,11 @@ export function validateRequirement(data) {
   }
   if (data.status && !VALID_STATUSES.includes(data.status)) {
     errors.push(`status must be one of: ${VALID_STATUSES.join(', ')}`);
+  }
+
+  // Check source
+  if (data.source && data.source.type && !VALID_SOURCES.includes(data.source.type)) {
+    errors.push(`source.type must be one of: ${VALID_SOURCES.join(', ')}`);
   }
 
   // Check title length

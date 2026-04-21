@@ -150,47 +150,28 @@ router.get("/type", authenticateToken, async (req, res) => {
         .json({ error: "Invalid 'type'. Must be 'AI' or 'Cybersecurity'." });
     }
 
-    const matchQuery = { isActive: true }; // Start with base query for active risks
+    // 1. Find projects that match this type traditionally via their template
+    const relevantProjects = await Project.find({
+      template: { $in: useCaseTypes },
+    }).select("projectId -_id").lean();
+    const projectIds = relevantProjects.map((p) => p.projectId);
 
+    // 2. Build the hybrid query: Look for direct systemType label OR project ID association
+    const matchQuery = { 
+      isActive: true,
+      $or: [
+        { systemType: lowerCaseType === "ai" ? "AI System" : "Cybersecurity" },
+        { projectId: { $in: projectIds } }
+      ]
+    };
+
+    // 3. If a specific projectId was selected, it overrides the list
     if (projectId && projectId !== "all") {
-      // --- If a specific projectId is provided ---
-      // 1. Verify this project actually matches the requested type
-      const specificProject = await Project.findOne({
-        projectId: projectId, // Assuming projectId is the field in Project model
-        template: { $in: useCaseTypes },
-      }).lean();
-
-      if (!specificProject) {
-        // Project doesn't exist or doesn't match the type, return empty
-        return res.json({
-          risks: [],
-          pagination: { page: 1, limit: parseInt(limit), total: 0, pages: 0 },
-        });
-      }
-      // 2. Set the match query to this specific project
-      matchQuery.projectId = projectId;
-    } else {
-      // --- If NO specific projectId is provided, find all projects of the type ---
-      const relevantProjects = await Project.find({
-        template: { $in: useCaseTypes },
-      })
-        .select("projectId -_id")
-        .lean(); // Get only projectId field
-
-      const projectIds = relevantProjects.map((p) => p.projectId);
-
-      if (projectIds.length === 0) {
-        // No projects of this type found, return empty
-        return res.json({
-          risks: [],
-          pagination: { page: 1, limit: parseInt(limit), total: 0, pages: 0 },
-        });
-      }
-      // 3. Set the match query to risks belonging to any of these projects
-      matchQuery.projectId = { $in: projectIds };
+       delete matchQuery.$or;
+       matchQuery.projectId = projectId;
     }
 
-    // --- Add Search and Status filters (consistent with GET /) ---
+    // --- Add Search and Status filters ---
     if (search) {
       matchQuery.$or = [
         { riskName: { $regex: search, $options: "i" } },

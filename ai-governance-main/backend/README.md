@@ -456,3 +456,11 @@ For issues or questions:
 ---
 
 **Note**: This backend system is designed for governance and compliance applications. Ensure proper testing and security validation before deploying to production environments.
+
+
+## Run the AI agent
+cd ai-governance-main\backend\Agents
+python main.py
+
+install the new requirements
+check the .env file inside agents folder (added google API, Atlassian API key)

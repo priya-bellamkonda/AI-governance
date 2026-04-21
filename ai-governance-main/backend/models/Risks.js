@@ -72,6 +72,10 @@ const RisksSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  systemType: {
+    type: String,
+    index: true
   }
 }, {
   timestamps: true,collection: 'Risks'

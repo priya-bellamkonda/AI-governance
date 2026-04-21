@@ -31,36 +31,40 @@ router.use(passport.initialize());
 router.use(passport.session());
 
 // Google Strategy
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
-      callbackURL: CALLBACK_URL,
-    },
-    async (accessToken, refreshToken, profile, done) => {
-      try {
-        const email = profile.emails[0].value;
+if (CLIENT_ID && CLIENT_SECRET) {
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        callbackURL: CALLBACK_URL,
+      },
+      async (accessToken, refreshToken, profile, done) => {
+        try {
+          const email = profile.emails[0].value;
 
-        let user = await User.findOne({ email });
+          let user = await User.findOne({ email });
 
-        if (!user) {
-          user = await User.create({
-            name: profile.displayName,
-            email,
-            googleId: profile.id,
-            role: 'user',
-            isActive: true,
-          });
+          if (!user) {
+            user = await User.create({
+              name: profile.displayName,
+              email,
+              googleId: profile.id,
+              role: 'user',
+              isActive: true,
+            });
+          }
+
+          return done(null, user);
+        } catch (err) {
+          return done(err, null);
         }
-
-        return done(null, user);
-      } catch (err) {
-        return done(err, null);
       }
-    }
-  )
-);
+    )
+  );
+} else {
+  console.warn("⚠️ Google OAuth credentials missing in .env. Skipping Google Strategy initialization.");
+}
 
 // Serialize & Deserialize
 passport.serializeUser((user, done) => {

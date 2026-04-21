@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,15 +21,17 @@ import {
 import {
   DropdownMenu, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import {
   Search, Plus, MoreHorizontal,
   ChevronLeft, ChevronRight, ShieldCheck,
-  Zap, MessageCircle,
+  Zap, MessageCircle, Check, X, Trash2
 } from "lucide-react";
 import {
   getRequirements,
   createRequirement,
+  updateRequirement,
   deleteRequirement,
   collectRequirements,
 } from "../../services/requirementsService.js";
@@ -60,7 +62,7 @@ const CATEGORIES = [
   "Authentication", "Access Control", "Encryption",
   "Data Protection", "Logging", "Network Security",
   "Physical Security", "Incident Response",
-  "Compliance", "AI Security", "IoT Security",
+  "Compliance", "AI Security", "IoT Security", "Other",
 ];
 
 const PRIORITIES = ["Critical", "High", "Medium", "Low"];
@@ -78,6 +80,8 @@ const emptyForm = {
 // ══════════════════════════════════════════════════════════════
 export default function RequirementsPage() {
   const [requirements, setRequirements] = useState([]);
+  const [activeMenuId, setActiveMenuId] = useState(null); 
+  const menuRef = useRef(null);
   const [isLoading, setIsLoading]       = useState(true);
   const [error, setError]               = useState(null);
 
@@ -121,6 +125,21 @@ export default function RequirementsPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // ── Close menu on click outside ────────────────────────────
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setActiveMenuId(null);
+      }
+    };
+    if (activeMenuId) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [activeMenuId]);
 
   // ── Filter + search ────────────────────────────────────────
   const filtered = requirements.filter((r) => {
@@ -175,6 +194,16 @@ export default function RequirementsPage() {
       setFormError(err.response?.data?.error || err.response?.data?.errors?.join(", ") || "Failed to save.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Update Status ──────────────────────────────────────────
+  const handleStatusUpdate = async (id, newStatus) => {
+    try {
+      await updateRequirement(id, { status: newStatus });
+      fetchData(); // Refresh list
+    } catch (err) {
+      alert(`Failed to update status to ${newStatus}`);
     }
   };
 
@@ -372,22 +401,46 @@ export default function RequirementsPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(req.id)}
-                              className="text-destructive focus:text-destructive"
+                      <TableCell className="relative">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-8 w-8 bg-gray-50 border-gray-300"
+                          onClick={() => {
+                            console.log("Three dots clicked for req:", req._id);
+                            setActiveMenuId(activeMenuId === req._id ? null : req._id);
+                          }}
+                        >
+                          <MoreHorizontal className="w-4 h-4 text-gray-700" />
+                        </Button>
+
+                        {activeMenuId === req._id && (
+                          <div 
+                            ref={menuRef}
+                            className="absolute right-12 top-0 w-36 bg-white border-2 border-gray-200 shadow-2xl rounded-lg z-[9999] py-2"
+                            style={{ minWidth: '150px' }}
+                          >
+                            <button
+                              onClick={() => { handleStatusUpdate(req.id, "Approved"); setActiveMenuId(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-green-50 font-medium"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => { handleStatusUpdate(req.id, "Rejected"); setActiveMenuId(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 font-medium"
+                            >
+                              Reject
+                            </button>
+                            <div className="border-t my-1"></div>
+                            <button
+                              onClick={() => { handleDelete(req.id); setActiveMenuId(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium"
                             >
                               Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                            </button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

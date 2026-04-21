@@ -12,6 +12,7 @@ from starlette.requests import Request
 from pydantic import BaseModel
 
 # --- Initialization from Orchestrator ---
+from agents.integration_service import integration_service
 load_dotenv()
 app = FastAPI(title="AI Governance Agent API (Combined)", version="2.0.0")
 
@@ -406,6 +407,21 @@ def _mount_governance():
         pct = round((implemented / total) * 100, 1) if total else 0.0
         return {"scores": {"EU": pct, "NIST": pct, "ISO": pct}, "implementedControls": implemented, "totalControls": total, "report": {"summary": f"{implemented}/{total} controls evidenced ({pct}%).", "details": {}}}
     print("[INFO] Mounted governance stub as a fallback.")
+
+# --- Mount Collection Agent ---
+_safe_include(lambda: __import__("agents.collection_agent", fromlist=["router"]).router,
+              "/agent/collection", "collection_agent")
+
+# --- Atlassian Integration Endpoints ---
+@app.get("/agent/integrations/jira")
+def jira_sync(jql: str = "issuetype = Requirement OR issuetype = Epic"):
+    issues = integration_service.fetch_jira_issues(jql)
+    return {"status": "success", "count": len(issues), "data": issues}
+
+@app.get("/agent/integrations/confluence")
+def confluence_sync(space: str = None):
+    pages = integration_service.fetch_confluence_pages(space)
+    return {"status": "success", "count": len(pages), "data": pages}
 
 _mount_governance()
 

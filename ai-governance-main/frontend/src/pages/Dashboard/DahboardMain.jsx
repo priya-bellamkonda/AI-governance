@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card"; // CardContent removed
 import { Button } from "@/components/ui/button";
@@ -95,6 +95,8 @@ const Dashboard = () => {
   // --- Pagination State ---
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [activeMenuId, setActiveMenuId] = useState(null);
+  const menuRef = useRef(null);
   // --- End Pagination State ---
 
   const navigate = useNavigate();
@@ -137,6 +139,21 @@ const Dashboard = () => {
     setTemplatePopoverOpen(false);
   };
   // --- End Filter Handlers ---
+
+  // Close menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setActiveMenuId(null);
+      }
+    };
+    if (activeMenuId) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [activeMenuId]);
 
   const handleStatusUpdate = async (projectId, newStatus) => {
     try {
@@ -457,62 +474,57 @@ const Dashboard = () => {
                         {project.status || "N/A"}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                          >
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() =>
-                              handleStatusUpdate(project.projectId, "Open")
-                            }
+                    <TableCell className="relative">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 bg-gray-50 border-gray-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuId(activeMenuId === project.projectId ? null : project.projectId);
+                        }}
+                      >
+                        <MoreHorizontal className="w-4 h-4 text-gray-700" />
+                      </Button>
+
+                      {activeMenuId === project.projectId && (
+                        <div 
+                          ref={menuRef}
+                          className="absolute right-12 top-0 w-48 bg-white border-2 border-gray-200 shadow-2xl rounded-lg z-[9999] py-2"
+                        >
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStatusUpdate(project.projectId, "Open"); setActiveMenuId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                           >
                             Set to Open
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              handleStatusUpdate(
-                                project.projectId,
-                                "In Progress"
-                              )
-                            }
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStatusUpdate(project.projectId, "In Progress"); setActiveMenuId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-amber-700 hover:bg-amber-50"
                           >
                             Set to In Progress
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              handleStatusUpdate(
-                                project.projectId,
-                                "Pending Approval"
-                              )
-                            }
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStatusUpdate(project.projectId, "Pending Approval"); setActiveMenuId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-blue-700 hover:bg-blue-50"
                           >
                             Set to Pending Approval
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              handleStatusUpdate(project.projectId, "Approved")
-                            }
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStatusUpdate(project.projectId, "Approved"); setActiveMenuId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-green-50"
                           >
                             Set to Approved
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              handleStatusUpdate(project.projectId, "Failed")
-                            }
-                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                          </button>
+                          <div className="border-t my-1"></div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStatusUpdate(project.projectId, "Failed"); setActiveMenuId(null); }}
+                            className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50"
                           >
                             Set to Failed
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

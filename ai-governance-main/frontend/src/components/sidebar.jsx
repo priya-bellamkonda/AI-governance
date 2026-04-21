@@ -26,7 +26,8 @@ const Sidebar = ({ open, onToggle }) => {
     >
       {/* 4. Reworked Logo/Header section */}
       <div
-        className={`flex items-center mb-8 ${
+        onClick={onToggle}
+        className={`flex items-center mb-8 cursor-pointer hover:opacity-80 transition-opacity ${
           open ? "justify-between" : "justify-center"
         }`}
       >
@@ -37,7 +38,6 @@ const Sidebar = ({ open, onToggle }) => {
             className="w-8 h-8 flex-shrink-0"
           />
 
-          {/* This text will now hide/show with a transition */}
           <div
             className={`overflow-hidden transition-all ${
               open ? "ml-2 w-auto opacity-100" : "w-0 opacity-0"
@@ -51,9 +51,11 @@ const Sidebar = ({ open, onToggle }) => {
         </div>
 
         {/* 5. Mobile-only Close button */}
-        {/* This button is hidden on desktop (md:hidden) */}
         <button
-          onClick={onToggle}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
           className="p-1 rounded-full hover:bg-white/20 md:hidden"
         >
           <X className="h-5 w-5" />

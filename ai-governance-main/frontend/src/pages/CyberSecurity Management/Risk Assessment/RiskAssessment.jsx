@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,20 +33,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Plus,
@@ -61,17 +47,15 @@ import {
   ChevronRight,
   X as XIcon,
   Settings,
-  ChevronsUpDown,
-  Check,
 } from "lucide-react";
 import riskMatrixService from "../../../services/riskMatrixService";
+import { getProjects } from "@/services/projectService";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-
-// Load export libraries dynamically or ensure they are globally available
-// import * as XLSX from "xlsx"; // Assuming loaded via script tag or similar
-// import jsPDF from "jspdf"; // Assuming loaded via script tag or similar
-// import "jspdf-autotable"; // Assuming loaded via script tag or similar
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { Menu, Transition } from "@headlessui/react";
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -84,7 +68,100 @@ const statusOptions = [
   { value: "Rejected", label: "Rejected" },
 ];
 
-// --- ErrorDisplay Component (Defined Outside) ---
+const dashboardStatusOptions = ["Pending", "Completed", "Rejected"];
+
+const getSeverityText = (severity) => {
+  const level = Math.round(severity || 0);
+  if (level >= 5) return "Critical";
+  if (level >= 4) return "High";
+  if (level >= 3) return "Medium";
+  if (level >= 2) return "Low";
+  return "Very Low";
+};
+
+// --- Isolated AddRiskForm Component to fix focus-loss issue ---
+const AddRiskForm = ({ onAdd, onCancel, projects }) => {
+  const [formData, setFormData] = useState({
+    riskName: "",
+    riskOwner: "",
+    severity: 3,
+    justification: "",
+    mitigation: "",
+    projectId: "cybersecurity-risk-assessment",
+  });
+
+  return (
+    <div className="grid gap-4 py-4">
+      <div className="grid grid-cols-4 items-center gap-4">
+        <label className="text-right text-sm font-medium">Name</label>
+        <Input
+          value={formData.riskName}
+          onChange={(e) => setFormData({ ...formData, riskName: e.target.value })}
+          className="col-span-3"
+          placeholder="Enter risk name"
+          required
+        />
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <label className="text-right text-sm font-medium">Owner</label>
+        <Input
+          value={formData.riskOwner}
+          onChange={(e) => setFormData({ ...formData, riskOwner: e.target.value })}
+          className="col-span-3"
+          placeholder="Enter owner name"
+          required
+        />
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <label className="text-right text-sm font-medium">Project</label>
+        <Select
+          value={formData.projectId}
+          onValueChange={(value) => setFormData({ ...formData, projectId: value })}
+        >
+          <SelectTrigger className="col-span-3">
+            <SelectValue placeholder="Select project" />
+          </SelectTrigger>
+          <SelectContent>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <label className="text-right text-sm font-medium">Severity</label>
+        <Select
+          value={String(formData.severity)}
+          onValueChange={(val) => setFormData({ ...formData, severity: parseInt(val) })}
+        >
+          <SelectTrigger className="col-span-3">
+            <SelectValue placeholder="Select severity" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="5">Critical</SelectItem>
+            <SelectItem value="4">High</SelectItem>
+            <SelectItem value="3">Medium</SelectItem>
+            <SelectItem value="2">Low</SelectItem>
+            <SelectItem value="1">Very Low</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          className="bg-blue-600 hover:bg-blue-700"
+          onClick={() => onAdd(formData)}
+          disabled={!formData.riskName || !formData.riskOwner}
+        >
+          Create Risk
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 const ErrorDisplay = ({ message, onDismiss }) => {
   if (!message) return null;
   return (
@@ -97,7 +174,6 @@ const ErrorDisplay = ({ message, onDismiss }) => {
   );
 };
 
-// --- Main Component ---
 const CyberSecurityRiskAssessment = () => {
   const [currentView, setCurrentView] = useState("dashboard");
   const [selectedRisk, setSelectedRisk] = useState(null);
@@ -107,125 +183,52 @@ const CyberSecurityRiskAssessment = () => {
   const [riskMatrixResults, setRiskMatrixResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
-  // --- Add Risk Dialog State ---
   const [isAddRiskDialogOpen, setAddRiskDialogOpen] = useState(false);
-  const [newRiskData, setNewRiskData] = useState({
-    riskName: "",
-    riskOwner: "",
-    severity: 3, // Default to Medium
-    justification: "",
-    mitigation: "",
-    projectId: "cybersecurity-risk-assessment", // Default specific to this page
-  });
-  // ---
-
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 10, // Items per page
-    total: 0,
-    pages: 0,
-  });
-
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, pages: 0 });
   const [error, setError] = useState(null);
   const [selectedProjectId, setSelectedProjectId] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [projects, setProjects] = useState([]);
-  const [isProjectPopoverOpen, setProjectPopoverOpen] = useState(false);
   const [riskStats, setRiskStats] = useState({
-    summary: {
-      totalAssessments: 0,
-      completedAssessments: 0,
-      pendingAssessments: 0,
-    },
+    summary: { totalAssessments: 0, completedAssessments: 0, pendingAssessments: 0 },
   });
-  const [pieData, setPieData] = useState([
-    { name: "Critical", value: 0, color: "#ef4444" },
-    { name: "High", value: 0, color: "#f97316" },
-    { name: "Medium", value: 0, color: "#eab308" },
-    { name: "Low", value: 0, color: "#22c55e" },
-  ]);
-
-  // --- Effects ---
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => setError(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [error]);
+  const [activeDropdown, setActiveDropdown] = useState(null);
+  const [pieData, setPieData] = useState([]);
 
   useEffect(() => {
     fetchRiskMatrixResults();
     fetchRiskStats();
     fetchProjects();
-  }, []); // Initial fetch
+  }, []);
 
+  // Click outside listener for dropdowns
   useEffect(() => {
-    // Update Pie chart data when results change
-    if (!riskMatrixResults || riskMatrixResults.length === 0) {
-      setPieData([]);
-      return;
-    }
-    const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-    for (const risk of riskMatrixResults) {
-      const level = Math.round(risk.severity || 0);
-      if (level >= 5) counts.Critical += 1;
-      else if (level >= 4) counts.High += 1;
-      else if (level >= 3) counts.Medium += 1;
-      else if (level >= 2) counts.Low += 1;
-    }
-    const pieDataArray = [
-      { name: "Critical", value: counts.Critical, color: "#ef4444" },
-      { name: "High", value: counts.High, color: "#f97316" },
-      { name: "Medium", value: counts.Medium, color: "#eab308" },
-      { name: "Low", value: counts.Low, color: "#22c55e" },
-    ].filter((item) => item.value > 0);
-    setPieData(pieDataArray);
-  }, [riskMatrixResults]);
+    const handleClickOutside = (event) => {
+      if (activeDropdown && !event.target.closest('.custom-dropdown')) {
+        setActiveDropdown(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeDropdown]);
 
-  const { recentProjects, allOtherProjects } = useMemo(() => {
-    const recents = projects.slice(0, 4);
-    const others = projects.slice(4);
-    return { recentProjects: recents, allOtherProjects: others };
-  }, [projects]);
-
-  // --- Data Fetching ---
   const fetchRiskMatrixResults = async (params = {}) => {
-    setError(null);
     setLoading(true);
-
-    const pageToFetch = params.page ? params.page : 1;
-    // Reset page to 1 if it's a filter/search action, not a pagination click
-    if (!params.page) {
-      setPagination((prev) => ({ ...prev, page: 1 }));
-    } else {
-      setPagination((prev) => ({ ...prev, page: params.page }));
-    }
-
+    const pageToFetch = params.page || 1;
     try {
-      const response = await riskMatrixService.getRisksBySystemType(
-        "Cybersecurity",
-        {
-          page: pageToFetch,
-          limit: pagination.limit,
-          search: params.search !== undefined ? params.search : searchQuery,
-          projectId:
-            params.projectId !== undefined
-              ? params.projectId
-              : selectedProjectId,
-          status: params.status !== undefined ? params.status : selectedStatus,
-          sortBy: "createdAt",
-          sortOrder: "desc",
-        }
-      );
+      const response = await riskMatrixService.getRisksBySystemType("Cybersecurity", {
+        page: pageToFetch,
+        limit: pagination.limit,
+        search: params.search !== undefined ? params.search : searchQuery,
+        projectId: params.projectId !== undefined ? params.projectId : selectedProjectId,
+        status: params.status !== undefined ? params.status : selectedStatus,
+        sortBy: "createdAt",
+        sortOrder: "desc",
+      });
       setRiskMatrixResults(response.risks || []);
-      setPagination(
-        response.pagination || { page: 1, limit: 10, total: 0, pages: 0 }
-      );
+      setPagination(response.pagination || { page: 1, limit: 10, total: 0, pages: 0 });
     } catch (e) {
-      console.error("Error fetching risks:", e);
-      setError(e.message || "Failed to fetch cybersecurity risks.");
-      setRiskMatrixResults([]);
+      setError(e.message || "Failed to fetch dashboard data.");
     } finally {
       setLoading(false);
     }
@@ -233,1133 +236,394 @@ const CyberSecurityRiskAssessment = () => {
 
   const fetchProjects = async () => {
     try {
-      // --- THIS LINE IS CHANGED ---
-      const response = await riskMatrixService.getRisksBySystemType(
-        "Cybersecurity",
-        { limit: 1000 }
-      );
-      // --- END OF CHANGE ---
-
-      const uniqueProjects = [
-        ...new Map(
-          (response.risks || [])
-            .filter((risk) => risk.projectId) // Ensure projectId exists
-            .map((risk) => [
-              risk.projectId,
-              { id: risk.projectId, name: risk.projectId }, // Use id and name
-            ])
-        ).values(),
-      ];
-      setProjects(uniqueProjects);
+      const response = await getProjects();
+      const allProjects = response.data || response || [];
+      const formatted = allProjects.map(p => ({
+        id: p.projectId || p._id,
+        name: p.projectName || p.name || p.id
+      }));
+      setProjects(formatted);
     } catch (e) {
-      console.error("Error fetching projects for filter:", e);
-      // Handle project fetching error silently or show a specific message
+      console.error("Error fetching projects", e);
     }
   };
 
   const fetchRiskStats = async () => {
     try {
-      const stats = await riskMatrixService.getRiskStatistics(
-        selectedProjectId === "all" ? null : selectedProjectId // Pass projectId if selected
-      );
+      const stats = await riskMatrixService.getRiskStatistics(selectedProjectId === "all" ? null : selectedProjectId);
       setRiskStats(stats);
       const newPieData = [
-        {
-          name: "Critical",
-          value: stats.riskLevels?.Critical || 0,
-          color: "#ef4444",
-        },
+        { name: "Critical", value: stats.riskLevels?.Critical || 0, color: "#ef4444" },
         { name: "High", value: stats.riskLevels?.High || 0, color: "#f97316" },
-        {
-          name: "Medium",
-          value: stats.riskLevels?.Medium || 0,
-          color: "#eab308",
-        },
+        { name: "Medium", value: stats.riskLevels?.Medium || 0, color: "#eab308" },
         { name: "Low", value: stats.riskLevels?.Low || 0, color: "#22c55e" },
-      ].filter((item) => item.value > 0);
+      ].filter(item => item.value > 0);
       setPieData(newPieData);
     } catch (e) {
-      console.error("Error fetching risk statistics:", e);
-      setError(e.message || "Failed to load statistics.");
+      console.error("Stats error", e);
     }
   };
 
-  // --- Handlers ---
-  const handleRiskClick = (risk) => {
-    setError(null);
-    setSelectedRisk(risk);
-    setCurrentView("detail");
-  };
-
-  const handleBackToDashboard = () => {
-    setError(null);
-    setCurrentView("dashboard");
-    setSelectedRisk(null);
-  };
-
-  const handleSearch = (query) => {
-    setSearchQuery(query);
-    fetchRiskMatrixResults({ search: query, page: 1 }); // Go to page 1 on new search
-  };
-
-  const handlePageChange = (newPage) => {
-    if (newPage >= 1 && newPage <= pagination.pages) {
-      fetchRiskMatrixResults({ page: newPage }); // Fetch specific page
-    }
-  };
-
-  const handleProjectFilterChange = (projectId) => {
-    setSelectedProjectId(projectId);
-    fetchRiskMatrixResults({ projectId: projectId, page: 1 }); // Go to page 1 on filter change
-    fetchRiskStats(); // Update stats for the selected project
-  };
-
-  const handleStatusFilterChange = (status) => {
-    setSelectedStatus(status);
-    fetchRiskMatrixResults({ status: status, page: 1 }); // Go to page 1 on filter change
-  };
-
-  const handleStatusUpdate = async (risk, newStatus) => {
-    setError(null);
-    if (!risk.projectId) {
-      const msg = `Cannot update risk "${risk.riskName}": Project ID is missing.`;
-      setError(msg);
-      console.error("Update failed: Project ID is missing for risk:", risk);
-      return;
-    }
-
-    try {
-      await riskMatrixService.updateRiskStatus(
-        risk.riskAssessmentId,
-        risk.projectId,
-        newStatus
-      );
-      // Optimistically update UI
-      setRiskMatrixResults((prevRisks) =>
-        prevRisks.map((r) =>
-          r._id === risk._id ? { ...r, status: newStatus } : r
-        )
-      );
-      await fetchRiskStats(); // Refresh stats after update
-    } catch (e) {
-      console.error("Error updating risk status:", e);
-      setError(e.message || "An unknown error occurred while updating status.");
-      // Optionally revert UI change here if needed
-    }
-  };
-
-  // Updated handleAddRisk to reset form and close dialog
   const handleAddRisk = async (data) => {
-    setError(null);
     try {
-      const projectId = data.projectId || "cybersecurity-risk-assessment"; // Use default if not provided
-      await riskMatrixService.addRisk(projectId, data);
-
-      // Reset form state
-      setNewRiskData({
-        riskName: "",
-        riskOwner: "",
-        severity: 3,
-        justification: "",
-        mitigation: "",
-        projectId: "cybersecurity-risk-assessment",
-      });
-      setAddRiskDialogOpen(false); // Close dialog
-
-      // Refresh data (fetch page 1 to see the new item)
-      await fetchRiskMatrixResults({ page: 1 });
-      await fetchRiskStats();
-    } catch (e) {
-      console.error("Error adding risk:", e);
-      setError(e.message || "Failed to add risk.");
-      // Keep dialog open on error? setAddRiskDialogOpen(true);
-    }
-  };
-
-  // --- Export Handlers (assuming script loading logic exists) ---
-  const ensureScriptsAreLoaded = () => {
-    /* ... unchanged ... */
-    return new Promise((resolve, reject) => {
-      const scripts = {
-        xlsx: "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
-        jspdf:
-          "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
-        jspdfAutotable:
-          "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js",
+      const enriched = {
+        ...data,
+        riskAssessmentId: `R-${Math.floor(Math.random() * 900 + 100)}`,
+        sessionId: `S-${Date.now().toString().slice(-6)}`,
+        systemType: "Cybersecurity",
       };
-      const loadScript = (id, url) =>
-        new Promise((res, rej) => {
-          // Check if script exists or if library is globally available
-          if (
-            document.getElementById(id) ||
-            window[id.split("-")[0].toUpperCase().replace("LIB", "")]
-          )
-            return res();
-          const script = document.createElement("script");
-          script.id = id;
-          script.src = url;
-          script.async = true;
-          script.onload = res;
-          script.onerror = () =>
-            rej(new Error(`Failed to load script: ${url}`));
-          document.head.appendChild(script);
-        });
-
-      Promise.all([
-        loadScript("xlsx-lib", scripts.xlsx),
-        loadScript("jspdf-lib", scripts.jspdf),
-      ])
-        .then(() =>
-          // Ensure jspdf.plugin is available after jspdf loads
-          loadScript("jspdf-autotable-lib", scripts.jspdfAutotable).then(
-            resolve
-          )
-        )
-        .catch(reject);
-    });
+      await riskMatrixService.addRisk(data.projectId, enriched);
+      setAddRiskDialogOpen(false);
+      fetchRiskMatrixResults({ page: 1 });
+      fetchRiskStats();
+    } catch (e) {
+      setError(e.message || "Failed to add risk.");
+    }
   };
 
   const handleExportExcel = async () => {
-    /* ... unchanged ... */
     setIsExporting(true);
-    setError(null);
     try {
-      await ensureScriptsAreLoaded();
-      if (!window.XLSX) throw new Error("XLSX library not loaded.");
-      const XLSX = window.XLSX;
-
-      const response = await riskMatrixService.getRisksBySystemType(
-        "Cybersecurity",
-        {
-          // Fetch ALL relevant risks for export
-          limit: pagination.total || 1000, // Fetch all if total is known, else a large number
-          search: searchQuery,
-          projectId: selectedProjectId,
-          status: selectedStatus,
-        }
-      );
-      const allRisks = response.risks || [];
-      const dataToExport = allRisks.map((risk) => ({
-        "Risk ID": risk.riskAssessmentId || risk._id,
-        "Project ID": risk.projectId || "N/A",
-        Name: risk.riskName,
-        "Risk Level": `${getSeverityText(risk.severity)} (${risk.severity})`,
-        Strategy: risk.status || "N/A",
-        Owner: risk.createdBy?.name || risk.riskOwner || "N/A",
-      }));
-      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const response = await riskMatrixService.getRisksBySystemType("Cybersecurity", {
+        limit: 1000,
+        search: searchQuery,
+        projectId: selectedProjectId,
+        status: selectedStatus,
+      });
+      const worksheet = XLSX.utils.json_to_sheet((response.risks || []).map(r => ({
+        ID: r.riskAssessmentId || r._id,
+        Name: r.riskName,
+        Severity: getSeverityText(r.severity),
+        Status: r.status,
+        Owner: r.riskOwner
+      })));
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Cybersecurity Risks");
-      XLSX.writeFile(workbook, "Cybersecurity_Risks_Export.xlsx");
-    } catch (e) {
-      console.error("Failed to export to Excel:", e);
-      setError(e.message || "Failed to export to Excel.");
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Risks");
+      XLSX.writeFile(workbook, "Cybersecurity_Risks.xlsx");
     } finally {
       setIsExporting(false);
     }
   };
+
   const handleExportPDF = async () => {
-    /* ... unchanged ... */
     setIsExporting(true);
-    setError(null);
     try {
-      await ensureScriptsAreLoaded();
-      if (
-        !window.jspdf ||
-        !window.jspdf.jsPDF ||
-        typeof window.jspdf.jsPDF.autoTable !== "function"
-      ) {
-        throw new Error(
-          "jsPDF or jsPDF-AutoTable library not loaded correctly."
-        );
-      }
-      const { jsPDF } = window.jspdf;
+      const response = await riskMatrixService.getRisksBySystemType("Cybersecurity", { limit: 1000 });
       const doc = new jsPDF();
-
-      doc.text("Cybersecurity Risk Assessment Report", 14, 16);
-      const response = await riskMatrixService.getRisksBySystemType(
-        "Cybersecurity",
-        {
-          // Fetch ALL relevant risks for export
-          limit: pagination.total || 1000,
-          search: searchQuery,
-          projectId: selectedProjectId,
-          status: selectedStatus,
-        }
-      );
-      const allRisks = response.risks || [];
-      const tableColumn = ["Risk ID", "Name", "Level", "Strategy", "Owner"];
-      const tableRows = allRisks.map((risk) => [
-        risk.riskAssessmentId || risk._id,
-        risk.riskName,
-        `${getSeverityText(risk.severity)} (${risk.severity})`,
-        risk.status || "N/A",
-        risk.createdBy?.name || risk.riskOwner || "N/A",
-      ]);
-      doc.autoTable({ head: [tableColumn], body: tableRows, startY: 20 });
-      doc.save("Cybersecurity_Risks_Export.pdf");
-    } catch (e) {
-      console.error("Error exporting to PDF:", e);
-      setError(e.message || "Failed to export to PDF.");
+      doc.text("Cybersecurity Risk Report", 14, 15);
+      autoTable(doc, {
+        startY: 20,
+        head: [["ID", "Name", "Severity", "Status"]],
+        body: (response.risks || []).map(r => [r.riskAssessmentId, r.riskName, getSeverityText(r.severity), r.status])
+      });
+      doc.save("Cybersecurity_Risks.pdf");
     } finally {
       setIsExporting(false);
     }
   };
 
-  // --- Utility Functions ---
-  const getSeverityText = (severity) => {
-    /* ... unchanged ... */
-    const level = Math.round(severity);
-    if (level >= 5) return "Critical";
-    if (level >= 4) return "High";
-    if (level >= 3) return "Medium";
-    if (level >= 2) return "Low";
-    return "Very Low";
-  };
-  const calculateStrategyProgress = () => {
-    /* ... unchanged ... */
-    if (!riskMatrixResults || riskMatrixResults.length === 0) {
-      return { completed: 0, pending: 0, rejected: 0, total: 0 };
-    }
-    const strategyCounts = { completed: 0, pending: 0, rejected: 0 };
-    riskMatrixResults.forEach((risk) => {
-      const status = risk.status;
-      if (status === "Completed") strategyCounts.completed += 1;
-      else if (status === "Pending") strategyCounts.pending += 1;
-      else if (status === "Rejected") strategyCounts.rejected += 1;
-    });
-    const total = riskMatrixResults.length;
-    return { ...strategyCounts, total };
-  };
   const calculateHeatmapData = () => {
-    /* ... unchanged ... */
-    if (!riskMatrixResults || riskMatrixResults.length === 0) {
-      return Array.from({ length: 25 }, () => ({ intensity: 0, riskCount: 0 }));
-    }
-    const grid = Array.from({ length: 25 }, () => ({
-      intensity: 0,
-      riskCount: 0,
-    }));
+    const grid = Array.from({ length: 25 }, () => ({ intensity: 0, riskCount: 0 }));
     riskMatrixResults.forEach((risk) => {
       const severity = Math.round(risk.severity || 0);
-      let impact = 1,
-        probability = 1;
-      if (severity >= 5) {
-        impact = 5;
-        probability = 5;
-      } else if (severity >= 4) {
-        impact = 4;
-        probability = 4;
-      } else if (severity >= 3) {
-        impact = 3;
-        probability = 3;
-      } else if (severity >= 2) {
-        impact = 2;
-        probability = 2;
-      }
-      const gridIndex = (probability - 1) * 5 + (impact - 1);
-      if (gridIndex >= 0 && gridIndex < 25) {
-        grid[gridIndex].riskCount += 1;
-        grid[gridIndex].intensity = Math.min(
-          grid[gridIndex].riskCount /
-            Math.max(1, riskMatrixResults.length / 10),
-          1
-        );
+      const impact = Math.min(Math.max(severity, 1), 5);
+      const probability = Math.min(Math.max(severity, 1), 5);
+      const index = (probability - 1) * 5 + (impact - 1);
+      if (index >= 0 && index < 25) {
+        grid[index].riskCount += 1;
+        grid[index].intensity = Math.min(grid[index].riskCount / 5, 1);
       }
     });
     return grid;
   };
 
-  // --- Render Logic ---
+  const handleStatusUpdate = async (risk, nextStatus) => {
+    try {
+      await riskMatrixService.updateRiskStatus(risk.riskAssessmentId, risk.projectId, nextStatus);
+      setActiveDropdown(null);
+      fetchRiskMatrixResults();
+    } catch (e) {
+      setError("Failed to update status.");
+    }
+  };
 
-  const DashboardView = () => (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-foreground">
-          Cybersecurity Risk Manager
-        </h1>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-          <Input
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            className="pl-10 w-64"
-          />
-        </div>
-      </div>
+  return (
+    <div className="min-h-screen bg-background p-6">
+      <ErrorDisplay message={error} onDismiss={() => setError(null)} />
 
-      <div className="space-y-6 mt-6">
-        {/* Action Bar */}
-        <div className="flex flex-wrap gap-4 mb-6">
-          <Button
-            variant="default"
-            className="bg-blue-600 hover:bg-blue-700"
-            onClick={() => setAddRiskDialogOpen(true)} // Open dialog
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add risk
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={isExporting}>
-                <Download className="w-4 h-4 mr-2" />
-                {isExporting ? "Exporting..." : "Export risks"}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={handleExportExcel}>
-                Export as Excel (.xlsx)
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleExportPDF}>
-                Export as PDF (.pdf)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+      {currentView === "dashboard" ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold">Cybersecurity Risk Manager</h1>
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search risks..."
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  fetchRiskMatrixResults({ search: e.target.value });
+                }}
+              />
+            </div>
+          </div>
 
-          {/* Project Filter Combobox */}
-          <Popover
-            open={isProjectPopoverOpen}
-            onOpenChange={setProjectPopoverOpen}
-          >
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                role="combobox"
-                aria-expanded={isProjectPopoverOpen}
-                className="w-[200px] justify-between"
-              >
-                {selectedProjectId === "all"
-                  ? "Select a Project"
-                  : projects.find((p) => p.id === selectedProjectId)?.name ||
-                    "Select a Project"}
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[200px] p-0">
-              <Command>
-                <CommandInput placeholder="Search projects..." />
-                <CommandList>
-                  <CommandEmpty>No project found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem
-                      value="all"
-                      onSelect={() => {
-                        handleProjectFilterChange("all");
-                        setProjectPopoverOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4",
-                          selectedProjectId === "all"
-                            ? "opacity-100"
-                            : "opacity-0"
-                        )}
-                      />{" "}
-                      All Projects
-                    </CommandItem>
-                  </CommandGroup>
-                  {recentProjects.length > 0 && (
-                    <>
-                      {" "}
-                      <CommandSeparator />{" "}
-                      <CommandGroup heading="Recent Projects">
-                        {" "}
-                        {recentProjects.map((p) => (
-                          <CommandItem
-                            key={p.id}
-                            value={p.name}
-                            onSelect={() => {
-                              handleProjectFilterChange(p.id);
-                              setProjectPopoverOpen(false);
-                            }}
-                          >
-                            {" "}
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedProjectId === p.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              )}
-                            />{" "}
-                            {p.name}{" "}
-                          </CommandItem>
-                        ))}{" "}
-                      </CommandGroup>{" "}
-                    </>
-                  )}
-                  {allOtherProjects.length > 0 && (
-                    <>
-                      {" "}
-                      <CommandSeparator />{" "}
-                      <CommandGroup heading="All Projects">
-                        {" "}
-                        {allOtherProjects.map((p) => (
-                          <CommandItem
-                            key={p.id}
-                            value={p.name}
-                            onSelect={() => {
-                              handleProjectFilterChange(p.id);
-                              setProjectPopoverOpen(false);
-                            }}
-                          >
-                            {" "}
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedProjectId === p.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              )}
-                            />{" "}
-                            {p.name}{" "}
-                          </CommandItem>
-                        ))}{" "}
-                      </CommandGroup>{" "}
-                    </>
-                  )}
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+          <div className="flex gap-4 items-center">
+            <Button onClick={() => setAddRiskDialogOpen(true)} className="bg-blue-600 hover:bg-blue-700 w-[150px] h-10">
+              <Plus className="w-4 h-4 mr-2" /> Add risk
+            </Button>
 
-          {/* Status Filter Select */}
-          <Select
-            value={selectedStatus}
-            onValueChange={handleStatusFilterChange}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Select Status" />
-            </SelectTrigger>
-            <SelectContent>
-              {statusOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {" "}
-                  {opt.label}{" "}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            <Menu as="div" className="relative">
+              <Menu.Button as={Button} variant="outline" className="w-[150px] h-10" disabled={isExporting}>
+                <Download className="w-4 h-4 mr-2" /> {isExporting ? "Exporting..." : "Export"}
+              </Menu.Button>
+              <Transition as={Fragment} enter="transition ease-out duration-100" enterFrom="transform opacity-0 scale-95" enterTo="transform opacity-100 scale-100" leave="transition ease-in duration-75" leaveFrom="transform opacity-100 scale-100" leaveTo="transform opacity-0 scale-95">
+                <Menu.Items className="absolute right-0 mt-2 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50 p-1">
+                  <Menu.Item>{({ active }) => (
+                    <button onClick={handleExportExcel} className={cn("flex w-full items-center px-3 py-2 text-sm rounded-md", active && "bg-gray-100")}>Excel (.xlsx)</button>
+                  )}</Menu.Item>
+                  <Menu.Item>{({ active }) => (
+                    <button onClick={handleExportPDF} className={cn("flex w-full items-center px-3 py-2 text-sm rounded-md", active && "bg-gray-100")}>PDF (.pdf)</button>
+                  )}</Menu.Item>
+                </Menu.Items>
+              </Transition>
+            </Menu>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Risk Level Distribution</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                    labelLine={false}
-                    label={({ name, percent }) =>
-                      `${name} ${(percent * 100).toFixed(0)}%`
+            <Select value={selectedProjectId} onValueChange={(val) => {
+              setSelectedProjectId(val);
+              fetchRiskMatrixResults({ projectId: val });
+            }}>
+              <SelectTrigger className="w-[220px] h-10">
+                <SelectValue placeholder="Select Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedStatus} onValueChange={(val) => {
+              setSelectedStatus(val);
+              fetchRiskMatrixResults({ status: val });
+            }}>
+              <SelectTrigger className="w-[180px] h-10">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statusOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader><CardTitle className="text-lg">Distribution</CardTitle></CardHeader>
+              <CardContent>
+                <div className="h-48 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                        labelLine={false}
+                        label={({ name, percent }) =>
+                          `${name} ${(percent * 100).toFixed(0)}%`
+                        }
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle className="text-lg">Strategy Progress</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {["Completed", "Pending", "Rejected"].map(s => (
+                  <div key={s}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>{s}</span>
+                      <span>{riskStats.summary?.[`${s.toLowerCase()}Assessments`] || 0}</span>
+                    </div>
+                    <Progress value={riskStats.summary?.totalAssessments > 0 ? (riskStats.summary?.[`${s.toLowerCase()}Assessments`] / riskStats.summary.totalAssessments) * 100 : 0} />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle className="text-lg">Heat Map</CardTitle></CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-5 gap-1 h-32 w-full">
+                  {calculateHeatmapData().map((c, i) => {
+                    let b = "bg-gray-100 text-transparent";
+                    if (c.riskCount > 0) {
+                      if (c.intensity <= 0.3) b = "bg-yellow-200 text-yellow-800";
+                      else if (c.intensity <= 0.6) b = "bg-orange-300 text-orange-900";
+                      else if (c.intensity <= 0.8) b = "bg-red-400 text-white";
+                      else b = "bg-red-600 text-white";
                     }
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Risk Strategy Progress</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {(() => {
-                const p = calculateStrategyProgress();
-                return (
-                  <>
-                    {" "}
-                    <div>
-                      <div className="flex justify-between mb-2">
-                        <span className="text-sm">Completed</span>
-                        <span className="text-sm font-medium">
-                          {p.completed} risks
-                        </span>
+                    return (
+                      <div
+                        key={i}
+                        className={`${b} rounded-sm flex items-center justify-center text-[10px] font-medium transition-colors`}
+                        title={`Risks: ${c.riskCount}`}
+                      >
+                        {c.riskCount > 0 ? c.riskCount : ""}
                       </div>
-                      <Progress
-                        value={p.total > 0 ? (p.completed / p.total) * 100 : 0}
-                        className="h-3"
-                      />
-                    </div>{" "}
-                    <div>
-                      <div className="flex justify-between mb-2">
-                        <span className="text-sm">Pending</span>
-                        <span className="text-sm font-medium">
-                          {p.pending} risks
-                        </span>
-                      </div>
-                      <Progress
-                        value={p.total > 0 ? (p.pending / p.total) * 100 : 0}
-                        className="h-3"
-                      />
-                    </div>{" "}
-                    <div>
-                      <div className="flex justify-between mb-2">
-                        <span className="text-sm">Rejected</span>
-                        <span className="text-sm font-medium">
-                          {p.rejected} risks
-                        </span>
-                      </div>
-                      <Progress
-                        value={p.total > 0 ? (p.rejected / p.total) * 100 : 0}
-                        className="h-3"
-                      />
-                    </div>{" "}
-                  </>
-                );
-              })()}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Risk Heat Map</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">
-                  Impact (X) vs Probability (Y)
+                    );
+                  })}
                 </div>
-                <div className="grid grid-cols-5 gap-1 h-32">
-                  {(() => {
-                    const d = calculateHeatmapData();
-                    return d.map((c, i) => {
-                      let b = "bg-gray-100";
-                      if (c.riskCount > 0) {
-                        if (c.intensity <= 0.3) b = "bg-yellow-200";
-                        else if (c.intensity <= 0.6) b = "bg-orange-300";
-                        else if (c.intensity <= 0.8) b = "bg-red-400";
-                        else b = "bg-red-600";
-                      }
-                      return (
-                        <div
-                          key={i}
-                          className={`${b} rounded-sm relative group cursor-pointer flex items-center justify-center`}
-                          title={`Impact: ${(i % 5) + 1}, Prob: ${
-                            Math.floor(i / 5) + 1
-                          }, Risks: ${c.riskCount}`}
-                        >
-                          {c.riskCount > 0 && (
-                            <span className="text-xs font-medium text-white mix-blend-difference">
-                              {c.riskCount}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Low Impact</span>
-                  <span>High Impact</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        <ErrorDisplay message={error} onDismiss={() => setError(null)} />
-
-        {/* Risk Table */}
-        <Card>
-          <CardContent className="p-0">
+          <Card className="overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Project ID</TableHead>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="w-24">ID</TableHead>
+                  <TableHead>Project</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead>Risk level</TableHead>
-                  <TableHead>Strategy</TableHead>
-                  <TableHead>Controls</TableHead>
-                  <TableHead>Manager</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
-                      <div className="flex items-center justify-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        <span className="ml-2">Loading risks...</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : riskMatrixResults.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="text-center py-8 text-muted-foreground"
-                    >
-                      No risks found for the selected filters.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  riskMatrixResults.map((item) => (
-                    <TableRow key={item._id}>
-                      {" "}
-                      <TableCell
-                        className="font-medium text-blue-600 cursor-pointer hover:underline"
-                        onClick={() => handleRiskClick(item)}
-                      >
-                        {item.riskAssessmentId || item._id}
-                      </TableCell>{" "}
-                      <TableCell>{item.projectId || "N/A"}</TableCell>{" "}
-                      <TableCell>{item.riskName}</TableCell>{" "}
-                      <TableCell>
-                        {" "}
-                        <Badge
-                          variant="secondary"
-                          className={
-                            item.severity >= 5
-                              ? "bg-red-100 text-red-800"
-                              : item.severity >= 4
+                  <TableRow><TableCell colSpan={6} className="text-center py-10">Loading...</TableCell></TableRow>
+                ) : riskMatrixResults.map(item => (
+                  <TableRow key={item._id}>
+                    <TableCell onClick={() => { setSelectedRisk(item); setCurrentView("detail"); }} className="font-medium text-blue-600 cursor-pointer">{item.riskAssessmentId}</TableCell>
+                    <TableCell className="text-sm">{item.projectId}</TableCell>
+                    <TableCell>{item.riskName}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          item.severity >= 5
+                            ? "bg-red-100 text-red-800"
+                            : item.severity >= 4
                               ? "bg-orange-100 text-orange-800"
                               : item.severity >= 3
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-green-100 text-green-800"
-                          }
-                        >
-                          {" "}
-                          {getSeverityText(item.severity)} ({item.severity}){" "}
-                        </Badge>{" "}
-                      </TableCell>{" "}
-                      <TableCell>{item.status || "Not Set"}</TableCell>{" "}
-                      <TableCell>{item.controlCount || 0}</TableCell>{" "}
-                      <TableCell>
-                        {" "}
-                        <Avatar className="w-8 h-8">
-                          <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                            {item.riskOwner?.charAt(0) ||
-                              item.createdBy?.name?.charAt(0) ||
-                              "U"}
-                          </AvatarFallback>
-                        </Avatar>{" "}
-                      </TableCell>{" "}
-                      <TableCell className="text-right">
-                        {" "}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                            >
-                              <span className="sr-only">Open menu</span>•••
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                handleStatusUpdate(item, "Completed")
-                              }
-                            >
-                              Completed
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                handleStatusUpdate(item, "Pending")
-                              }
-                            >
-                              Pending
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                handleStatusUpdate(item, "Rejected")
-                              }
-                            >
-                              Rejected
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>{" "}
-                      </TableCell>{" "}
-                    </TableRow>
-                  ))
-                )}
+                                ? "bg-yellow-100 text-yellow-800"
+                                : "bg-green-100 text-green-800"
+                        )}
+                      >
+                        {getSeverityText(item.severity)} ({item.severity})
+                      </Badge>
+                    </TableCell>
+                    <TableCell><Badge variant="outline">{item.status}</Badge></TableCell>
+                    <TableCell className="text-right relative custom-dropdown">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdown(activeDropdown === item._id ? null : item._id);
+                        }}
+                      >
+                        <span className="sr-only">Open menu</span>•••
+                      </Button>
+
+                      {activeDropdown === item._id && (
+                        <div className="absolute right-0 top-10 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 text-left overflow-hidden">
+                          <button
+                            onClick={() => handleStatusUpdate(item, "Completed")}
+                            className="w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 transition-colors border-b flex items-center text-left"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
+                            Completed
+                          </button>
+                          <button
+                            onClick={() => handleStatusUpdate(item, "Pending")}
+                            className="w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-yellow-50 hover:text-yellow-700 transition-colors border-b flex items-center text-left"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-yellow-500 mr-2"></span>
+                            Pending
+                          </button>
+                          <button
+                            onClick={() => handleStatusUpdate(item, "Rejected")}
+                            className="w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors flex items-center text-left"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+                            Rejected
+                          </button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
-          </CardContent>
-
-          {/* Pagination */}
-          {pagination.pages > 1 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t">
-              <div className="text-sm text-muted-foreground">
-                Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
-                {Math.min(pagination.page * pagination.limit, pagination.total)}{" "}
-                of {pagination.total} risks
-              </div>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(pagination.page - 1)}
-                  disabled={pagination.page <= 1}
-                  className="flex items-center gap-1"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </Button>
-                <div className="flex items-center space-x-1">
-                  {" "}
-                  {Array.from(
-                    { length: Math.min(5, pagination.pages) },
-                    (_, i) => {
-                      let pN;
-                      if (pagination.pages <= 5) pN = i + 1;
-                      else if (pagination.page <= 3) pN = i + 1;
-                      else if (pagination.page >= pagination.pages - 2)
-                        pN = pagination.pages - 4 + i;
-                      else pN = pagination.page - 2 + i;
-                      return (
-                        <Button
-                          key={pN}
-                          variant={
-                            pN === pagination.page ? "default" : "outline"
-                          }
-                          size="sm"
-                          onClick={() => handlePageChange(pN)}
-                          className="w-8 h-8 p-0"
-                        >
-                          {pN}
-                        </Button>
-                      );
-                    }
-                  )}{" "}
+            {pagination.pages > 1 && (
+              <div className="p-4 border-t flex justify-between items-center bg-muted/20">
+                <span className="text-sm text-muted-foreground">Page {pagination.page} of {pagination.pages}</span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={pagination.page <= 1} onClick={() => fetchRiskMatrixResults({ page: pagination.page - 1 })}><ChevronLeft className="w-4 h-4" /></Button>
+                  <Button variant="outline" size="sm" disabled={pagination.page >= pagination.pages} onClick={() => fetchRiskMatrixResults({ page: pagination.page + 1 })}><ChevronRight className="w-4 h-4" /></Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(pagination.page + 1)}
-                  disabled={pagination.page >= pagination.pages}
-                  className="flex items-center gap-1"
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
               </div>
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* --- Add Risk Dialog --- */}
-      <Dialog open={isAddRiskDialogOpen} onOpenChange={setAddRiskDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Add New Cybersecurity Risk</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="riskName-add" className="text-right">
-                Name
-              </label>
-              <Input
-                id="riskName-add"
-                value={newRiskData.riskName}
-                onChange={(e) =>
-                  setNewRiskData({ ...newRiskData, riskName: e.target.value })
-                }
-                className="col-span-3"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="riskOwner-add" className="text-right">
-                Owner
-              </label>
-              <Input
-                id="riskOwner-add"
-                value={newRiskData.riskOwner}
-                onChange={(e) =>
-                  setNewRiskData({ ...newRiskData, riskOwner: e.target.value })
-                }
-                className="col-span-3"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="severity-add" className="text-right">
-                Severity
-              </label>
-              <Select
-                value={String(newRiskData.severity)}
-                onValueChange={(value) =>
-                  setNewRiskData({ ...newRiskData, severity: parseInt(value) })
-                }
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select severity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5">Critical</SelectItem>
-                  <SelectItem value="4">High</SelectItem>
-                  <SelectItem value="3">Medium</SelectItem>
-                  <SelectItem value="2">Low</SelectItem>
-                  <SelectItem value="1">Very Low</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {/* TODO: Add Textarea for justification/mitigation here */}
-          </div>
-          <Button
-            onClick={() => {
-              if (!newRiskData.riskName || !newRiskData.riskOwner) {
-                alert("Risk Name and Owner are required.");
-                return;
-              }
-              handleAddRisk(newRiskData);
-            }}
-          >
-            Create Risk
+            )}
+          </Card>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <Button variant="outline" onClick={() => setCurrentView("dashboard")} className="mb-4">
+            <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader><CardTitle>Risk Details</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div><label className="text-xs text-muted-foreground">Name</label><p className="font-medium">{selectedRisk?.riskName}</p></div>
+                <div><label className="text-xs text-muted-foreground">Justification</label><p className="text-sm">{selectedRisk?.justification || "N/A"}</p></div>
+                <div><label className="text-xs text-muted-foreground">Mitigation</label><p className="text-sm">{selectedRisk?.mitigation || "N/A"}</p></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Assessment Details</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center pb-2 border-b">
+                  <span className="text-sm">Risk Score</span>
+                  <Badge className="bg-red-500">{selectedRisk?.severity}</Badge>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b">
+                  <span className="text-sm">Status</span>
+                  <Badge variant="outline">{selectedRisk?.status}</Badge>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm">Owner</span>
+                  <span className="text-sm font-medium">{selectedRisk?.riskOwner}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={isAddRiskDialogOpen} onOpenChange={setAddRiskDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader><DialogTitle>Create New Cybersecurity Risk</DialogTitle></DialogHeader>
+          <AddRiskForm
+            projects={projects}
+            onCancel={() => setAddRiskDialogOpen(false)}
+            onAdd={handleAddRisk}
+          />
         </DialogContent>
       </Dialog>
-    </div>
-  );
-
-  const DetailView = () => (
-    <div className="space-y-6">
-      {/* ... (DetailView JSX remains unchanged) ... */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="sm" onClick={handleBackToDashboard}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to all risks
-          </Button>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Settings className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-      <div className="flex items-center gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold">
-              {selectedRisk?.riskAssessmentId}
-            </h1>
-            <Badge variant="secondary" className="bg-red-100 text-red-800">
-              {getSeverityText(selectedRisk?.severity)} (
-              {selectedRisk?.severity})
-            </Badge>
-            <Badge variant="outline">{selectedRisk?.status}</Badge>
-          </div>
-          <h2 className="text-xl text-muted-foreground mt-1">
-            {selectedRisk?.riskName}
-          </h2>
-        </div>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm">
-          <User className="w-4 h-4 mr-2" />
-          Link control
-        </Button>
-        <Button variant="outline" size="sm">
-          <Plus className="w-4 h-4 mr-2" />
-          Add document
-        </Button>
-        <Button variant="outline" size="sm">
-          <MessageSquare className="w-4 h-4 mr-2" />
-          Comments
-        </Button>
-        <Button variant="outline" size="sm">
-          <Calendar className="w-4 h-4 mr-2" />
-          Tasks
-        </Button>
-        <Button variant="outline" size="sm">
-          Activity log
-        </Button>
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-sm">Residual risk automation</span>
-          <Switch />
-        </div>
-      </div>
-      <Card>
-        <CardHeader
-          className="cursor-pointer"
-          onClick={() => setRiskDetailsExpanded(!riskDetailsExpanded)}
-        >
-          <CardTitle className="flex items-center gap-2">
-            <ChevronDown
-              className={`w-4 h-4 transition-transform ${
-                riskDetailsExpanded ? "rotate-180" : ""
-              }`}
-            />
-            Risk details
-          </CardTitle>
-        </CardHeader>
-        {riskDetailsExpanded && (
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Justification: {selectedRisk?.justification || "N/A"}
-              <br />
-              Mitigation: {selectedRisk?.mitigation || "N/A"}
-              <br />
-              Created By:{" "}
-              {selectedRisk?.createdBy?.name ||
-                selectedRisk?.riskOwner ||
-                "N/A"}
-              <br />
-              Created At:{" "}
-              {selectedRisk?.createdAt
-                ? new Date(selectedRisk.createdAt).toLocaleDateString()
-                : "N/A"}
-            </p>
-          </CardContent>
-        )}
-      </Card>
-      <Card>
-        <CardHeader
-          className="cursor-pointer"
-          onClick={() => setRiskAnalysisExpanded(!riskAnalysisExpanded)}
-        >
-          <CardTitle className="flex items-center gap-2">
-            <ChevronDown
-              className={`w-4 h-4 transition-transform ${
-                riskAnalysisExpanded ? "rotate-180" : ""
-              }`}
-            />
-            Risk analysis
-          </CardTitle>
-        </CardHeader>
-        {riskAnalysisExpanded && (
-          <CardContent className="space-y-6">
-            <div>
-              <h4 className="font-medium mb-4">Inherent risk</h4>
-              <div className="flex justify-around gap-4 items-center">
-                <div>
-                  <span className="text-sm text-muted-foreground">Impact</span>
-                  <Badge className="bg-pink-500 text-white ml-2">
-                    Major (4)
-                  </Badge>
-                </div>
-                <div className="text-center">×</div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Likelihood
-                  </span>
-                  <Badge className="bg-orange-500 text-white ml-2">
-                    Possible (3)
-                  </Badge>
-                </div>
-                <div className="text-center">=</div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Risk level
-                  </span>
-                  <Badge className="bg-orange-500 text-white ml-2">
-                    {getSeverityText(selectedRisk?.severity)} (
-                    {selectedRisk?.severity || "N/A"})
-                  </Badge>
-                </div>
-                <div></div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Financial impact
-                  </span>
-                  <div className="text-sm mt-1">
-                    {selectedRisk?.financialImpact || "Not set"}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-medium mb-4">Residual risk</h4>
-              <div className="flex justify-around gap-4 items-center">
-                <div>
-                  <span className="text-sm text-muted-foreground">Impact</span>
-                  <Badge className="bg-yellow-500 text-white ml-2">
-                    Moderate (3)
-                  </Badge>
-                </div>
-                <div className="text-center">×</div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Likelihood
-                  </span>
-                  <Badge className="bg-yellow-500 text-white ml-2">
-                    Unlikely (2)
-                  </Badge>
-                </div>
-                <div className="text-center">=</div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Risk level
-                  </span>
-                  <Badge className="bg-yellow-500 text-white ml-2">
-                    {getSeverityText(selectedRisk?.residualScore)} (
-                    {selectedRisk?.residualScore || "N/A"})
-                  </Badge>
-                </div>
-                <div></div>
-                <div>
-                  <span className="text-sm text-muted-foreground">
-                    Financial impact
-                  </span>
-                  <div className="text-sm mt-1">
-                    {selectedRisk?.residualFinancialImpact || "Not set"}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div>
-              <span className="text-sm text-muted-foreground">
-                Target risk level
-              </span>
-              <Badge className="bg-teal-500 text-white ml-2">
-                {getSeverityText(selectedRisk?.targetScore)} (
-                {selectedRisk?.targetScore || "N/A"})
-              </Badge>
-            </div>
-            <div className="text-right">
-              <Button variant="link" className="text-blue-600">
-                How is the Risk level calculated?
-              </Button>
-            </div>
-          </CardContent>
-        )}
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Treatment plan</span>
-            <Button className="bg-blue-600 hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Add plan
-            </Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Treatment plan details will appear here.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-background flex-1">
-      <main className="p-6">
-        {currentView === "dashboard" ? <DashboardView /> : <DetailView />}
-      </main>
     </div>
   );
 };

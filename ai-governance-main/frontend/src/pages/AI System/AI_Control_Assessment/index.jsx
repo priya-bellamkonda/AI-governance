@@ -31,7 +31,8 @@ import { twMerge } from "tailwind-merge";
 
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
+import { getProjects } from "@/services/projectService";
 
 // Import Combobox components from your UI library
 import {
@@ -109,61 +110,73 @@ const AIControlAssessment = () => {
     setCurrentPage(1);
   }, [status, selectedProjectId]);
 
+  const fetchProjects = async () => {
+    try {
+      const response = await getProjects();
+      const allProjects = response.data || response || [];
+      const formattedProjects = allProjects.map(p => ({
+        id: p.projectId || p._id || p.id,
+        name: p.projectName || p.name || p.title
+      }));
+
+      // Merge with any projects actually in the controls table to ensure nothing is missed
+      const controlsResult = await controlService.getControlsBySystemType("AI", { limit: 1000 });
+      const tableProjectIds = [...new Set((controlsResult.controls || []).map(c => c.projectId).filter(Boolean))];
+      
+      const finalProjects = [...formattedProjects];
+      tableProjectIds.forEach(id => {
+        if (!finalProjects.find(p => p.id === id)) {
+          finalProjects.push({ id, name: id, projectId: id });
+        }
+      });
+      
+      // Ensure each has a projectId field for the selector
+      const standardized = finalProjects.map(p => ({
+        ...p,
+        projectId: p.projectId || p.id
+      }));
+
+      setProjects(standardized);
+    } catch (e) {
+      console.error("Error fetching projects:", e);
+    }
+  };
+
   useEffect(() => {
-    const fetchControlsAndProjects = async () => {
+    const fetchControls = async () => {
       setLoading(true);
       setError("");
       try {
-        // Fetch all controls initially to populate the project list correctly
-        const allControlsResult = await controlService.getControlsBySystemType(
-          "AI",
-          { limit: 1000 } // Fetch a larger number to get a good project list
-        );
+        const result = await controlService.getControlsBySystemType("AI", {
+          limit: 1000, // Fetch all for local filtering (simple implementation)
+        });
 
-        const allFetchedControls = allControlsResult.controls || [];
-
-        // Create a unique list of all available projects
-        const uniqueProjects = [
-          ...new Map(
-            allFetchedControls.map((c) => [
-              c.projectId,
-              { projectId: c.projectId, name: c.projectId }, // Assuming name is same as ID for now
-            ])
-          ).values(),
-        ].filter((p) => p.projectId); // Filter out any null/undefined projectIds
-
-        setProjects(uniqueProjects);
-
-        // Now, filter the controls based on the selected filters
-        let filteredControls = allFetchedControls;
+        const fetchedControls = result.controls || [];
+        
+        let filtered = fetchedControls;
         if (status !== "all") {
-          filteredControls = filteredControls.filter(
-            (c) => c.status === status
-          );
+          filtered = filtered.filter(c => c.status === status);
         }
         if (selectedProjectId !== "all") {
-          filteredControls = filteredControls.filter(
-            (c) => c.projectId === selectedProjectId
-          );
+          filtered = filtered.filter(c => c.projectId === selectedProjectId);
         }
-        setControls(filteredControls);
+        
+        setControls(filtered);
       } catch (e) {
         setError(e.message || "Failed to load data");
         setControls([]);
-        setProjects([]);
       } finally {
         setLoading(false);
       }
     };
-    fetchControlsAndProjects();
+
+    fetchControls();
   }, [status, selectedProjectId]);
 
-  // Create derived lists for recent and all other projects
-  const { recentProjects, allOtherProjects } = useMemo(() => {
-    const recents = projects.slice(0, 4);
-    const others = projects.slice(4);
-    return { recentProjects: recents, allOtherProjects: others };
-  }, [projects]);
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
 
   // ... (handleStatusChange, handleExportExcel, handleExportPDF remain the same) ...
   const handleStatusChange = (controlId, newStatus) => {
@@ -222,7 +235,7 @@ const AIControlAssessment = () => {
         control.relatedRisks || "N/A",
         control.status,
       ]);
-      doc.autoTable({ head: [tableColumn], body: tableRows, startY: 20 });
+      autoTable(doc, { head: [tableColumn], body: tableRows, startY: 20 });
       doc.save("AI_Controls_Export.pdf");
     } catch (err) {
       console.error("Failed to export to PDF:", err);
@@ -251,14 +264,14 @@ const AIControlAssessment = () => {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span>AI System Controls Assessment</span>
-          <div className="flex flex-wrap gap-2 z-10">
+          <div className="flex flex-wrap gap-4 z-10">
             {/* Export Menu remains the same */}
             <Menu as="div" className="relative inline-block text-left">
               {/* ... menu content ... */}
               <Menu.Button
                 as={Button}
                 variant="outline"
-                size="sm"
+                className="w-[150px] h-10 justify-center"
                 disabled={isExporting}
               >
                 <Download className="w-4 h-4 mr-2" />
@@ -307,114 +320,23 @@ const AIControlAssessment = () => {
             </Menu>
 
             {/* REPLACE the old project <Select> with this new <Popover> Combobox */}
-            <Popover
-              open={isProjectPopoverOpen}
-              onOpenChange={setProjectPopoverOpen}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={isProjectPopoverOpen}
-                  className="w-[200px] justify-between"
-                >
-                  {selectedProjectId === "all"
-                    ? "Select a Project"
-                    : projects.find((p) => p.projectId === selectedProjectId)
-                        ?.name || "Select a Project"}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[200px] p-0 z-50"> {/* Added z-index */}
-                <Command>
-                  <CommandInput placeholder="Search projects..." />
-                  <CommandList>
-                    <CommandEmpty>No project found.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        value="all"
-                        onSelect={() => {
-                          setSelectedProjectId("all");
-                          setProjectPopoverOpen(false);
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            "mr-2 h-4 w-4",
-                            selectedProjectId === "all"
-                              ? "opacity-100"
-                              : "opacity-0"
-                          )}
-                        />
-                        All Projects
-                      </CommandItem>
-                    </CommandGroup>
-
-                    {/* Recent Projects Section */}
-                    {recentProjects.length > 0 && (
-                      <>
-                        <CommandSeparator />
-                        <CommandGroup heading="Recent Projects">
-                          {recentProjects.map((p) => (
-                            <CommandItem
-                              key={p.projectId}
-                              value={p.name}
-                              onSelect={() => { // Simplified onSelect
-                                setSelectedProjectId(p.projectId);
-                                setProjectPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  selectedProjectId === p.projectId
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                              {p.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </>
-                    )}
-                     {/* All Other Projects Section */}
-                    {allOtherProjects.length > 0 && (
-                      <>
-                        <CommandSeparator />
-                        <CommandGroup heading="All Projects">
-                          {allOtherProjects.map((p) => (
-                            <CommandItem
-                              key={p.projectId}
-                              value={p.name}
-                              onSelect={() => {
-                                setSelectedProjectId(p.projectId);
-                                setProjectPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  selectedProjectId === p.projectId
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                              {p.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </>
-                    )}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+              <SelectTrigger className="w-[250px] h-10">
+                <SelectValue placeholder="Select a Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.projectId} value={p.projectId}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             {/* Status Filter remains the same */}
             <Select value={status} onValueChange={setStatus}>
-              {/* ... select content ... */}
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-[180px] h-10">
                 <SelectValue>
                   {statusOptions.find((opt) => opt.value === status)?.label ||
                     "All Statuses"}
