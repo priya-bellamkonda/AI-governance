@@ -414,14 +414,19 @@ _safe_include(lambda: __import__("agents.collection_agent", fromlist=["router"])
 
 # --- Atlassian Integration Endpoints ---
 @app.get("/agent/integrations/jira")
-def jira_sync(jql: str = "issuetype = Requirement OR issuetype = Epic"):
-    issues = integration_service.fetch_jira_issues(jql)
+async def jira_sync(jql: str = "issuetype IN (Epic, Story, Task, Requirement)"):
+    issues = await integration_service.fetch_jira_issues(jql)
     return {"status": "success", "count": len(issues), "data": issues}
 
-@app.get("/agent/integrations/confluence")
-def confluence_sync(space: str = None):
-    pages = integration_service.fetch_confluence_pages(space)
-    return {"status": "success", "count": len(pages), "data": pages}
+@app.get("/agent/integrations/confluence/mcp")
+async def confluence_sync_mcp(query: str = "security requirements", page_id: str = None):
+    requirements = await integration_service.extract_requirements_mcp(query, page_id)
+    return {"status": "success", "count": len(requirements), "data": requirements}
+
+@app.get("/agent/integrations/confluence/assets")
+async def confluence_assets_sync(query: str = "assets inventory"):
+    assets = await integration_service.extract_assets_mcp(query)
+    return {"status": "success", "count": len(assets), "data": assets}
 
 _mount_governance()
 

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import axios from "axios";
+
 import { Search, Filter, Plus, RefreshCw, Edit, Download, Upload, Trash2, Settings, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,7 +140,57 @@ const Inventory = () => {
     aiUsage: "Low",
     status: "low"
   });
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+
+  const fetchFromConfluence = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+      const response = await axios.get(`${API_BASE_URL}/requirements/confluence/assets`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.success) {
+        const newAssets = response.data.data || [];
+        if (newAssets.length === 0) {
+          toast({
+            title: "No assets found",
+            description: "I checked Confluence but couldn't find any inventory items.",
+          });
+        } else {
+          // Map backend assets to inventory format
+          const formattedAssets = newAssets.map((asset, index) => ({
+            id: data.length + index + 1,
+            name: asset.name,
+            type: asset.type || "System",
+            contact: asset.contact || "-",
+            lastUpdated: new Date().toLocaleString(),
+            aiUsage: asset.aiUsage || "Low",
+            dataProcessing: asset.dataProcessing || "-",
+            status: (asset.status || asset.aiUsage || "low").toLowerCase()
+          }));
+          
+          setData(prev => [...prev, ...formattedAssets]);
+          toast({
+            title: "Success",
+            description: `Extracted ${newAssets.length} assets from Confluence via MCP.`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Confluence asset fetch error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to connect to Confluence MCP.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handleSelectAll = (checked) => {
     if (checked) {
@@ -440,6 +492,16 @@ const Inventory = () => {
                     
                     <Button variant="outline" size="icon" onClick={handleRefresh}>
                       <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    
+                    <Button 
+                      variant="default" 
+                      className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-700" 
+                      onClick={fetchFromConfluence}
+                      disabled={loading}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                      {loading ? "Syncing..." : "Sync from Confluence"}
                     </Button>
                     
                     <Button variant="outline" size="icon" onClick={handleBulkEdit}>

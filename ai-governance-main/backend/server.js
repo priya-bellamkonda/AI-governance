@@ -56,6 +56,11 @@ app.get('/', (req, res) => {
 });
 
 // ------------------------------
+// REQUIREMENTS ROUTE (Task‑4) - PUBLIC FOR TESTING
+// ------------------------------
+app.use('/requirements', requirementsRouter);
+
+// ------------------------------
 // PROTECTED ROUTES (AUTH + RATE LIMIT)
 // ------------------------------
 app.use(authenticateToken);
@@ -71,10 +76,6 @@ app.use('/risks', riskMatrixRisksRouter);
 app.use('/questionnaire', questionnaireRouter);
 app.use('/projects', projectRouter);
 
-// ------------------------------
-// REQUIREMENTS ROUTE (Task‑4)
-// ------------------------------
-app.use('/requirements', requirementsRouter);   // ✅ NEW
 
 app.use('/contact', emailRouter);
 app.use('/elements', elementRouter);

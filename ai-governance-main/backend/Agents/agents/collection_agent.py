@@ -206,7 +206,16 @@ async def upload_document(
         res = llm.invoke(prompt)
         
         try:
-            text = res.content.strip()
+            # Handle list or string content from Gemini
+            raw_text = ""
+            if isinstance(res.content, str):
+                raw_text = res.content
+            elif isinstance(res.content, list):
+                for part in res.content:
+                    if isinstance(part, dict) and "text" in part: raw_text += part["text"]
+                    else: raw_text += str(part)
+            
+            text = raw_text.strip()
             if text.startswith("```json"): text = text[7:-3].strip()
             elif text.startswith("```"): text = text[3:-3].strip()
             

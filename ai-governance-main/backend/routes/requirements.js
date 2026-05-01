@@ -66,14 +66,33 @@ router.get('/jira', async (req, res) => {
   }
 });
 
-// GET /requirements/confluence - Fetch from Confluence
+// GET /requirements/confluence - Fetch from Confluence via MCP
 router.get('/confluence', async (req, res) => {
   try {
-    const response = await axios.get(`${AGENT_URL}/agent/integrations/confluence`);
+    const query = req.query.query || "security requirements";
+    const pageId = req.query.page_id || "";
+    let url = `${AGENT_URL}/agent/integrations/confluence/mcp?query=${encodeURIComponent(query)}`;
+    if (pageId) url += `&page_id=${encodeURIComponent(pageId)}`;
+    
+    const response = await axios.get(url);
     res.json({ success: true, ...response.data });
   } catch (error) {
-    console.error('Error fetching from Confluence agent:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to fetch from Confluence' });
+    console.error('Error fetching from Confluence agent (MCP):', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch from Confluence MCP' });
+  }
+});
+
+// GET /requirements/confluence/assets - Fetch assets from Confluence via MCP
+router.get('/confluence/assets', async (req, res) => {
+  try {
+    const query = req.query.query || "assets inventory";
+    const url = `${AGENT_URL}/agent/integrations/confluence/assets?query=${encodeURIComponent(query)}`;
+    
+    const response = await axios.get(url);
+    res.json({ success: true, ...response.data });
+  } catch (error) {
+    console.error('Error fetching assets from Confluence agent (MCP):', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch assets from Confluence MCP' });
   }
 });
 

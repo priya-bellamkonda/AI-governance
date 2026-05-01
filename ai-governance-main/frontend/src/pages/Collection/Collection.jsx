@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  MessagesSquare, 
-  FileUp, 
+import {
+  MessagesSquare,
+  FileUp,
   CloudDownload,
   CheckCircle2,
   AlertCircle,
@@ -19,13 +19,22 @@ const Collection = () => {
       if (!saved) return [];
       const parsed = JSON.parse(saved);
       // CLEANUP: Filter out requirements status, document upload, and error messages from history
-      return parsed.filter(m => 
-        !m.content.includes("Requirement Added!") && 
-        !m.content.includes("Uploaded document:") && 
+      return parsed.filter(m =>
+        !m.content.includes("Requirement Added!") &&
+        !m.content.includes("Uploaded document:") &&
         !m.content.includes("Document analysis complete!") &&
         !m.content.includes("Successfully extracted") &&
         !m.content.includes("Error analyzing document") &&
-        !m.content.includes("Failed to analyze document")
+        !m.content.includes("Failed to analyze document") &&
+        !m.content.includes("Extracted") &&
+        !m.content.includes("Confluence is up to date") &&
+        !m.content.includes("I checked Jira") &&
+        !m.content.includes("I've found") &&
+        !m.content.includes("Jira") &&
+        !m.content.includes("Confluence") &&
+        !m.content.includes("MCP") &&
+        !m.content.includes("requirements") &&
+        !m.content.includes("Sorry, I encountered an error")
       );
     } catch (e) {
       return [];
@@ -33,6 +42,8 @@ const Collection = () => {
   });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [jiraLoading, setJiraLoading] = useState(false);
+  const [confluenceLoading, setConfluenceLoading] = useState(false);
   const [requirements, setRequirements] = useState(() => {
     const saved = localStorage.getItem("pending_requirements");
     try {
@@ -105,7 +116,7 @@ const Collection = () => {
       const { session_id, requirements: newReqs, answer } = response.data.data;
       setSessionId(session_id);
       setMessages(prev => [...prev, { role: "assistant", content: answer || "I've analyzed your input and extracted the requirements." }]);
-      
+
       // Filter out duplicates from the chat extraction too
       const filteredReqs = newReqs.filter(req => !existingRequirements.includes(req.title));
       setRequirements(prev => [...prev, ...filteredReqs]);
@@ -123,14 +134,14 @@ const Collection = () => {
       alert("Please provide both a title and description.");
       return;
     }
-    
+
     // Add to the local list with source 'manual'
     setRequirements(prev => [{
       ...manualReq,
       source: "manual",
       id: "MANUAL-" + Date.now()
     }, ...prev]);
-    
+
     // Reset and close
     setManualReq({ title: "", description: "", category: "Compliance" });
     setShowManualModal(false);
@@ -143,6 +154,10 @@ const Collection = () => {
     "AI Security", "IoT Security", "Other"
   ];
 
+  const removeRequirement = (title) => {
+    setRequirements(prev => prev.filter(item => item.title !== title));
+  };
+
   const saveRequirement = async (req) => {
     try {
       // Generate a valid ID format: REQ-2026-001
@@ -153,6 +168,16 @@ const Collection = () => {
       // Normalize category: if the source provides an invalid category, fall back to "Other"
       const rawCategory = req.category || "Compliance";
       const safeCategory = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : "Other";
+
+      // Determine valid source type for DB schema
+      const getSourceType = (src = "") => {
+        const s = src.toLowerCase();
+        if (s.includes("document")) return "document";
+        if (s.includes("jira")) return "jira";
+        if (s.includes("confluence")) return "confluence";
+        if (s.includes("chat")) return "chat";
+        return "manual";
+      };
 
       const token = localStorage.getItem("token");
       const response = await axios.post(`${API_BASE_URL}/requirements`, {
@@ -165,14 +190,14 @@ const Collection = () => {
         priority: req.priority || "High",
         status: "Draft",
         source: {
-          type: (req.source || "manual").toLowerCase(),
+          type: getSourceType(req.source || activeTab),
           timestamp: new Date(),
-          reference: req.id || ""
+          reference: req.source || ""
         }
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       if (response.data.success || response.data._id) {
         setRequirements(prev => prev.filter(item => item.title !== req.title));
         setExistingRequirements(prev => [...prev, req.title]);
@@ -186,7 +211,7 @@ const Collection = () => {
   };
 
   const fetchFromJira = async () => {
-    setLoading(true);
+    setJiraLoading(true);
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(`${API_BASE_URL}/requirements/jira`, {
@@ -195,45 +220,55 @@ const Collection = () => {
       if (response.data.success) {
         // FILTER: Only show what is NOT already saved
         const newItems = response.data.data.filter(item => !existingRequirements.includes(item.title));
-        
-        if (newItems.length === 0) {
-          setMessages(prev => [...prev, { role: "assistant", content: "I checked Jira, but you have already approved all the requirements I found there!" }]);
+        setRequirements(prev => [...prev, ...newItems]);
+
+        if (newItems.length > 0) {
+          alert(`Successfully extracted ${newItems.length} new requirements from Jira.`);
         } else {
-          setRequirements(prev => [...prev, ...newItems]);
-          setMessages(prev => [...prev, { role: "assistant", content: `I've found ${newItems.length} NEW requirements from Jira (skipping ${response.data.count - newItems.length} duplicates).` }]);
+          alert("Jira is already up to date.");
         }
       }
     } catch (error) {
       console.error("Jira fetch error:", error);
-      setMessages(prev => [...prev, { role: "assistant", content: "Failed to connect to Jira. Please check your credentials in the backend .env file." }]);
+      alert("Failed to connect to Jira. Please check your credentials.");
     } finally {
-      setLoading(false);
+      setJiraLoading(false);
     }
   };
 
   const fetchFromConfluence = async () => {
-    setLoading(true);
+    setConfluenceLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get(`${API_BASE_URL}/requirements/confluence`, {
+      const url = `${API_BASE_URL}/requirements/confluence?query=requirements`;
+
+      const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
+
       if (response.data.success) {
+        const extractedReqs = response.data.data || [];
+
+        if (extractedReqs.length === 0) {
+          alert("I checked Confluence but couldn't find any new requirements. Please ensure your project documentation is available.");
+          return;
+        }
+
         // FILTER: Only show what is NOT already saved
-        const newItems = response.data.data.filter(item => !existingRequirements.includes(item.title));
-        
-        if (newItems.length === 0) {
-          setMessages(prev => [...prev, { role: "assistant", content: "Confluence is up to date! No new requirements were found." }]);
+        const newItems = extractedReqs.filter(item => !existingRequirements.includes(item.title));
+        setRequirements(prev => [...prev, ...newItems]);
+
+        if (newItems.length > 0) {
+          alert(`Successfully extracted ${newItems.length} new requirements from Confluence.`);
         } else {
-          setRequirements(prev => [...prev, ...newItems]);
-          setMessages(prev => [...prev, { role: "assistant", content: `Extracted ${newItems.length} NEW requirements from Confluence docs.` }]);
+          alert("Confluence is already up to date.");
         }
       }
     } catch (error) {
       console.error("Confluence fetch error:", error);
-      setMessages(prev => [...prev, { role: "assistant", content: "Failed to connect to Confluence. Please check your credentials in the backend .env file." }]);
+      alert("Failed to connect to Confluence MCP. Please check your credentials.");
     } finally {
-      setLoading(false);
+      setConfluenceLoading(false);
     }
   };
 
@@ -246,7 +281,7 @@ const Collection = () => {
 
     setUploading(true);
     setLoading(true);
-    
+
     const token = localStorage.getItem("token");
     const formData = new FormData();
     formData.append("file", file);
@@ -254,19 +289,27 @@ const Collection = () => {
 
     try {
       const response = await axios.post(`${API_BASE_URL}/requirements/upload`, formData, {
-        headers: { 
+        headers: {
           "Content-Type": "multipart/form-data",
-          "Authorization": `Bearer ${token}` 
+          "Authorization": `Bearer ${token}`
         }
       });
 
       if (response.data.success) {
         const { requirements: newReqs, error: aiError } = response.data.data;
-        
-        if (!aiError) {
-          // Filter and add new requirements silently
-          const filteredReqs = newReqs.filter(req => !existingRequirements.includes(req.title));
-          setRequirements(prev => [...prev, ...filteredReqs]);
+
+        if (!aiError && newReqs) {
+          // Filter and add new requirements
+          const filteredReqs = newReqs.filter(req => !requirements.some(r => r.title === req.title));
+          
+          if (filteredReqs.length > 0) {
+            setRequirements(prev => [...prev, ...filteredReqs]);
+            alert(`Successfully extracted ${filteredReqs.length} new requirements from document.`);
+          } else if (newReqs.length > 0) {
+            alert("No new requirements found. All items in the document are already in your list.");
+          } else {
+            alert("Document analyzed, but no security requirements were found inside.");
+          }
         }
       }
     } catch (error) {
@@ -288,21 +331,21 @@ const Collection = () => {
           <p className="text-sm text-gray-500">Extract, categorize, and map security requirements via multiple channels.</p>
         </div>
         <div className="flex space-x-2">
-          <button 
+          <button
             onClick={() => setActiveTab("chat")}
             className={`flex items-center px-4 py-2 rounded-lg transition-all ${activeTab === "chat" ? "bg-indigo-600 text-white shadow-md" : "bg-white text-gray-600 hover:bg-gray-100"}`}
           >
             <MessagesSquare className="w-5 h-5 mr-2" />
             Chat
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab("docs")}
             className={`flex items-center px-4 py-2 rounded-lg transition-all ${activeTab === "docs" ? "bg-indigo-600 text-white shadow-md" : "bg-white text-gray-600 hover:bg-gray-100"}`}
           >
             <FileUp className="w-5 h-5 mr-2" />
             Documents
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab("jira")}
             className={`flex items-center px-4 py-2 rounded-lg transition-all ${activeTab === "jira" ? "bg-indigo-600 text-white shadow-md" : "bg-white text-gray-600 hover:bg-gray-100"}`}
           >
@@ -350,7 +393,7 @@ const Collection = () => {
                     placeholder="Describe your security requirements..."
                     className="w-full pl-4 pr-12 py-3 rounded-xl border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 bg-white"
                   />
-                  <button 
+                  <button
                     type="submit"
                     disabled={loading || !input.trim()}
                     className="absolute right-2 top-1.5 p-2 rounded-lg bg-indigo-600 text-white disabled:opacity-50 hover:bg-indigo-700 transition-colors"
@@ -364,7 +407,7 @@ const Collection = () => {
 
           {activeTab === "docs" && (
             <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-              <div 
+              <div
                 onClick={() => fileInputRef.current?.click()}
                 className={`w-full max-w-md p-10 border-2 border-dashed rounded-3xl transition-all cursor-pointer ${uploading ? "border-indigo-500 bg-indigo-50" : "border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-indigo-400"}`}
               >
@@ -379,17 +422,22 @@ const Collection = () => {
                 <p className="mt-1 text-sm text-gray-500">
                   {uploading ? "Our AI is extracting requirements. This will take a moment." : "Drop PDF, Word, Excel, or Markdown files here to extract requirements automatically."}
                 </p>
-                <input 
-                  type="file" 
+                <input
+                  type="file"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
-                  className="hidden" 
-                  id="file-upload" 
+                  onClick={(e) => e.stopPropagation()}
+                  className="hidden"
+                  id="file-upload"
                   accept=".pdf,.xlsx,.xls,.txt,.md"
                   disabled={uploading}
                 />
                 {!uploading && (
-                  <label htmlFor="file-upload" className="mt-6 inline-block px-6 py-2 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700 transition-colors">
+                  <label 
+                    htmlFor="file-upload" 
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-6 inline-block px-6 py-2 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700 transition-colors"
+                  >
                     Select Files
                   </label>
                 )}
@@ -400,27 +448,31 @@ const Collection = () => {
           {activeTab === "jira" && (
             <div className="flex-1 p-8 space-y-6">
               <div className="grid grid-cols-2 gap-4">
-                <div 
+                <div
                   onClick={fetchFromJira}
                   className="p-6 border rounded-2xl bg-white hover:border-indigo-500 transition-all cursor-pointer group"
                 >
                   <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 text-blue-600 group-hover:scale-110 transition-transform">
-                    <CloudDownload className="w-6 h-6" />
+                    {jiraLoading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <CloudDownload className="w-6 h-6" />}
                   </div>
                   <h3 className="font-bold text-gray-900">JIRA Integration</h3>
                   <p className="text-xs text-gray-500 mt-1">Import requirements directly from JIRA tickets & epics.</p>
-                  <button className="mt-4 text-xs font-semibold text-indigo-600 hover:text-indigo-800">Sync Now &rarr;</button>
+                  <button className="mt-4 text-xs font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50" disabled={jiraLoading}>
+                    {jiraLoading ? "Syncing..." : "Sync Now →"}
+                  </button>
                 </div>
-                <div 
+                <div
                   onClick={fetchFromConfluence}
                   className="p-6 border rounded-2xl bg-white hover:border-indigo-500 transition-all cursor-pointer group"
                 >
                   <div className="w-12 h-12 bg-cyan-100 rounded-xl flex items-center justify-center mb-4 text-cyan-600 group-hover:scale-110 transition-transform">
-                    <CloudDownload className="w-6 h-6" />
+                    {confluenceLoading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <CloudDownload className="w-6 h-6" />}
                   </div>
                   <h3 className="font-bold text-gray-900">Confluence</h3>
                   <p className="text-xs text-gray-500 mt-1">Extract requirements from Confluence documentation pages.</p>
-                  <button className="mt-4 text-xs font-semibold text-indigo-600 hover:text-indigo-800">Sync Now &rarr;</button>
+                  <button className="mt-4 text-xs font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50" disabled={confluenceLoading}>
+                    {confluenceLoading ? "Syncing..." : "Sync Now →"}
+                  </button>
                 </div>
               </div>
             </div>
@@ -434,7 +486,7 @@ const Collection = () => {
               Extracted Requirements
               <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs">{requirements.length}</span>
             </h2>
-            <button 
+            <button
               onClick={() => setShowManualModal(true)}
               className="text-sm font-medium text-indigo-600 hover:text-indigo-800 flex items-center"
             >
@@ -469,12 +521,20 @@ const Collection = () => {
                   <p className="text-sm text-gray-600 line-clamp-2">{req.description}</p>
                   <div className="mt-4 pt-4 border-t flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <span className="text-[10px] text-gray-400 italic">Extracted from {req.source || activeTab}</span>
-                    <button 
-                      onClick={() => saveRequirement(req)}
-                      className="flex items-center px-3 py-1 bg-indigo-600 text-white rounded text-xs font-semibold hover:bg-indigo-700 shadow-sm"
-                    >
-                      Add Requirement
-                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => removeRequirement(req.title)}
+                        className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-semibold transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => saveRequirement(req)}
+                        className="flex items-center px-3 py-1 bg-indigo-600 text-white rounded text-xs font-semibold hover:bg-indigo-700 shadow-sm transition-all"
+                      >
+                        Add Requirement
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -490,15 +550,15 @@ const Collection = () => {
               <h3 className="text-xl font-bold text-gray-900">Manual Requirement Entry</h3>
               <p className="text-xs text-gray-600 mt-1">Directly add a new security rule to your collection.</p>
             </div>
-            
+
             <form onSubmit={handleManualSubmit} className="p-8 space-y-5">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Requirement Title</label>
-                <input 
+                <input
                   type="text"
                   required
                   value={manualReq.title}
-                  onChange={(e) => setManualReq({...manualReq, title: e.target.value})}
+                  onChange={(e) => setManualReq({ ...manualReq, title: e.target.value })}
                   className="w-full px-4 py-2 rounded-xl border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                   placeholder="e.g. Multi-Factor Authentication"
                 />
@@ -506,9 +566,9 @@ const Collection = () => {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Category</label>
-                <select 
+                <select
                   value={manualReq.category}
-                  onChange={(e) => setManualReq({...manualReq, category: e.target.value})}
+                  onChange={(e) => setManualReq({ ...manualReq, category: e.target.value })}
                   className="w-full px-4 py-2 rounded-xl border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                 >
                   {["Authentication", "Access Control", "Encryption", "Data Protection", "Logging", "Network Security", "Physical Security", "Incident Response", "Compliance", "AI Security", "IoT Security", "Other"].map(cat => (
@@ -519,25 +579,25 @@ const Collection = () => {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
-                <textarea 
+                <textarea
                   required
                   rows={4}
                   value={manualReq.description}
-                  onChange={(e) => setManualReq({...manualReq, description: e.target.value})}
+                  onChange={(e) => setManualReq({ ...manualReq, description: e.target.value })}
                   className="w-full px-4 py-2 rounded-xl border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                   placeholder="Describe the security rule in detail (at least 10 characters)..."
                 />
               </div>
 
               <div className="pt-4 flex space-x-3">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowManualModal(false)}
                   className="flex-1 px-4 py-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-colors font-semibold"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-md transition-all font-semibold"
                 >
